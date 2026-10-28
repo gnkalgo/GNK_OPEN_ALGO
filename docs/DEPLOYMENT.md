@@ -52,10 +52,14 @@ Then use it to manage the stack:
 ./deploy/gnk-service.sh deploy
 ./deploy/gnk-service.sh status
 ./deploy/gnk-service.sh logs api
+./deploy/gnk-service.sh docker-status
+./deploy/gnk-service.sh docker-stop-all
 ./deploy/gnk-service.sh health
 ```
 
-`deploy` fast-forward pulls `origin/main`, then builds and starts the complete production stack; it runs database migrations through Compose before the API starts. Use `update` instead to build and start from the current local source without pulling. `start` does not rebuild, and `restart` only restarts existing containers. `stop` preserves containers and volumes. The helper does not provide a volume-deleting command.
+`deploy` fast-forward pulls `origin/main`, then builds and starts the complete production stack; it runs database migrations through Compose before the API starts. Use `update` instead to build and start from the current local source without pulling. `start` does not rebuild, and `restart` only restarts existing containers. `stop` preserves containers and volumes.
+
+`docker-status` lists all containers on the Docker host and displays each running container's processes. `docker-stop-all` stops all running Docker containers—including unrelated applications—after requiring the exact confirmation `STOP ALL DOCKER CONTAINERS`. It sends a graceful stop signal and preserves containers, images, and volumes; it does not stop host services or kill arbitrary host processes. Use this host-wide command only when you intend to stop every Docker workload.
 
 For local HTTP development, explicitly use `ENVIRONMENT=development`, `COOKIE_SECURE=false`, and `FRONTEND_URL=http://127.0.0.1:8080` in a **local** `.env`. Use the base Compose file without the TLS override. For Vite server development on 5173, use that exact origin instead. The Vite proxy forwards `/api` to local port 8000.
 

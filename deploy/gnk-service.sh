@@ -25,6 +25,8 @@ Commands:
   update                Build and start all using the current local source
   status                Show service state
   logs [service...]     Follow logs (defaults to all services)
+  docker-status        List all Docker containers and their running processes
+  docker-stop-all      Stop all running Docker containers after confirmation
   health                Check the public readiness endpoint
   config                Validate the production Compose configuration
   help                  Show this help
@@ -94,6 +96,37 @@ case "$command" in
         ;;
     logs)
         "${COMPOSE[@]}" logs --follow --tail=100 "$@"
+        ;;
+    docker-status)
+        if (($# > 0)); then
+            echo "Error: docker-status does not accept arguments." >&2
+            exit 2
+        fi
+        docker ps --all --format 'table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}'
+        mapfile -t container_ids < <(docker ps --quiet)
+        for container_id in "${container_ids[@]}"; do
+            container_name="$(docker inspect --format '{{.Name}}' "$container_id")"
+            printf '\nProcesses in %s (%s):\n' "${container_name#/}" "$container_id"
+            docker top "$container_id"
+        done
+        ;;
+    docker-stop-all)
+        if (($# > 0)); then
+            echo "Error: docker-stop-all does not accept arguments." >&2
+            exit 2
+        fi
+        mapfile -t container_ids < <(docker ps --quiet)
+        if ((${#container_ids[@]} == 0)); then
+            echo "No running Docker containers."
+            exit 0
+        fi
+        echo "This will stop every running Docker container on this server, including unrelated applications."
+        read -r -p "Type STOP ALL DOCKER CONTAINERS to continue: " confirmation
+        if [[ "$confirmation" != "STOP ALL DOCKER CONTAINERS" ]]; then
+            echo "Cancelled; no containers were stopped."
+            exit 1
+        fi
+        docker stop --time 10 "${container_ids[@]}"
         ;;
     health)
         if ! command -v curl >/dev/null 2>&1; then
