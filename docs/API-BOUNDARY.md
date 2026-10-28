@@ -31,6 +31,27 @@ All public auth POSTs require the configured `Origin`; authenticated mutations a
 
 The server adapter preserves an uncertain order response as Unknown with the original idempotency key and blocks a new request until reconciliation. The backend's paper fills are transactional and immediate; no real exchange outcome is modeled. Strategies are configuration/lifecycle records, not running trading algorithms. Market quotes remain explicitly fictional frontend/server fixtures. Dhan, FYERS and Zerodha flows only verify a broker account and store its display name plus masked identifier; access tokens are transient and discarded, and no live order API exists. Broker app credentials are read from server environment variables and must not be sent to the browser. Account linking does not establish regulatory approval or enable client trading.
 
+## Live trading control plane (live execution disabled)
+
+The following authenticated routes persist and audit user requests, but do **not** connect to OpenAlgo or submit live orders:
+
+| Method and route | Behavior |
+| --- | --- |
+| `GET /api/v1/gnkalgo/trading-mode` | Returns `PAPER`, current session summary, linked-account metadata, emergency-stop state, and explicit live blockers |
+| `PUT /api/v1/gnkalgo/trading-mode` | Accepts `PAPER`; rejects `LIVE` with `LIVE_TRADING_UNAVAILABLE` |
+| `POST /api/v1/gnkalgo/live-sessions` | Creates a configurable-TTL `PENDING_CONFIRMATION` request for an already linked Dhan, FYERS, or Zerodha account; default TTL is 15 minutes |
+| `GET /api/v1/gnkalgo/live-sessions/current` | Returns the current user's latest session and mode status; expiry is enforced server-side |
+| `GET /api/v1/gnkalgo/live-sessions/{id}` | Returns an owned session only |
+| `POST /api/v1/gnkalgo/live-sessions/{id}/confirm` | Requires `{ "confirmed": true }`; records confirmation and suspends the request because broker validation/per-user OpenAlgo isolation is unavailable |
+| `POST /api/v1/gnkalgo/live-sessions/{id}/suspend`, `/resume`, `/end` | Suspend/end owned sessions; resume is blocked until upstream isolation and broker authorization can be verified |
+| `GET /api/v1/gnkalgo/live-sessions/{id}/events` | Returns only that user's redacted session transition events |
+| `POST /api/v1/gnkalgo/emergency-stop` | Latches the user's stop and suspends any pending or active live session |
+| `DELETE /api/v1/gnkalgo/admin/users/{user_id}/emergency-stop` | Admin-only reset; clearing the stop does not resume or activate a session |
+
+Session states are `INACTIVE` (no record), `PENDING_CONFIRMATION`, `SUSPENDED`, `EXPIRED`, and `REVOKED`. `ACTIVE` is represented for the future contract but is deliberately unreachable in this delivery. Pending, suspended, and active states expire according to `LIVE_SESSION_TTL_SECONDS` (default 900 seconds, allowed range 60–86400); expired and revoked sessions are terminal. Every protected mutation uses GNK cookie authentication, CSRF/origin enforcement, ownership checks, and rate limiting. Session transitions are recorded in `live_trading_session_events` and the existing audit log.
+
+OpenAlgo is not included in the Docker stack and no per-user provisioner is configured. OpenAlgo's published API docs state that its API key resolves the active broker session server-side; a shared instance/key therefore must not be presumed to isolate users. This version does not claim per-user isolation, broker-token validity, real funds/positions, real market data, risk checks, or live execution. All `/orders` remain paper-only. Do not enable live trading or route real orders until an isolated upstream identity for each GNK user is verified end-to-end.
+
 The remaining sections describe the retained isolated demo and historical proposal, not additional implemented endpoints.
 
 ## Executable boundary in this delivery

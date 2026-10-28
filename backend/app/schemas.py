@@ -80,3 +80,15 @@ class UserStatus(Body):
 
 class BrokerConfirmation(Body):
     token: str = Field(min_length=32, max_length=128)
+
+
+class TradingModeRequest(Body):
+    mode: Literal["PAPER", "LIVE"]
+
+
+class LiveSessionRequest(Body):
+    broker_code: Literal["dhan", "fyers", "zerodha"]
+
+
+class LiveSessionConfirmation(Body):
+    confirmed: bool

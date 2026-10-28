@@ -3,7 +3,7 @@ import secrets
 from datetime import UTC, timedelta
 from decimal import Decimal
 from urllib.parse import parse_qs
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -17,10 +17,13 @@ from sqlalchemy.orm import Session
 from . import broker_auth
 from .config import settings
 from .db import get_db
+from .live_trading import router as live_trading_router
 from .models import (
     AuditEvent,
     BrokerConnection,
     EmailToken,
+    LiveTradingSession,
+    LiveTradingSessionEvent,
     MailOutbox,
     PaperOrder,
     Strategy,
@@ -60,6 +63,7 @@ app = FastAPI(
     docs_url="/api/docs" if settings().environment != "production" else None,
     redoc_url=None,
 )
+app.include_router(live_trading_router)
 PREFIX = "/api/gnk/v1"
 GNK_ALGO_PREFIX = "/api/v1/gnkalgo"
 BROKER_OAUTH_TTL = 300
@@ -902,6 +906,12 @@ def broker_confirm(
     data = json.loads(pending)
     if data.get("user_id") != user.id or data.get("code") != code:
         fail(404, "BROKER_LINK_EXPIRED", "Broker account confirmation expired. Reconnect and retry.")
+    user = db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     connection = db.scalar(
         select(BrokerConnection)
         .where(BrokerConnection.user_id == user.id, BrokerConnection.broker_code == code)
@@ -920,6 +930,29 @@ def broker_confirm(
                 account_name=data["account_name"],
             )
         )
+    live_sessions = db.scalars(
+        select(LiveTradingSession)
+        .where(
+            LiveTradingSession.user_id == user.id,
+            LiveTradingSession.broker_code == code,
+            LiveTradingSession.status.in_(("PENDING_CONFIRMATION", "ACTIVE")),
+        )
+        .with_for_update()
+    ).all()
+    for session in live_sessions:
+        session.status = "SUSPENDED"
+        session.suspension_reason = "BROKER_ACCOUNT_RELINKED"
+        session.version += 1
+        db.add(
+            LiveTradingSessionEvent(
+                session_id=session.id,
+                user_id=user.id,
+                event_type="BROKER_ACCOUNT_RELINKED",
+                reason_code="BROKER_ACCOUNT_RELINKED",
+                request_id=str(uuid4()),
+                metadata_json={},
+            )
+        )
     audit(db, user, f"{broker_auth.BROKERS[code]} account linked")
     db.commit()
     return {"status": "Connected"}
@@ -933,12 +966,42 @@ def broker_disconnect(
 ):
     if code not in broker_auth.BROKERS:
         fail(404, "BROKER_NOT_FOUND", "This broker is not supported.")
+    user = db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     connection = db.scalar(
         select(BrokerConnection).where(
             BrokerConnection.user_id == user.id, BrokerConnection.broker_code == code
         )
     )
     if connection:
+        linked_sessions = db.scalars(
+            select(LiveTradingSession)
+            .where(
+                LiveTradingSession.user_id == user.id,
+                LiveTradingSession.broker_code == code,
+            )
+            .with_for_update()
+        ).all()
+        for session in linked_sessions:
+            session.broker_connection_id = None
+            if session.status in {"PENDING_CONFIRMATION", "ACTIVE"}:
+                session.status = "SUSPENDED"
+                session.suspension_reason = "BROKER_ACCOUNT_UNLINKED"
+                session.version += 1
+                db.add(
+                    LiveTradingSessionEvent(
+                        session_id=session.id,
+                        user_id=user.id,
+                        event_type="BROKER_ACCOUNT_UNLINKED",
+                        reason_code="BROKER_ACCOUNT_UNLINKED",
+                        request_id=str(uuid4()),
+                        metadata_json={},
+                    )
+                )
         db.delete(connection)
         audit(db, user, f"{broker_auth.BROKERS[code]} account unlinked")
         db.commit()

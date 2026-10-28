@@ -36,6 +36,7 @@ class User(Base):
     session_version: Mapped[int] = mapped_column(default=0)
     balance: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("245680.50"))
     broker: Mapped[str] = mapped_column(String(20), default="Disconnected")
+    emergency_stop: Mapped[bool] = mapped_column(Boolean, default=False)
     watchlist: Mapped[list] = mapped_column(
         JSON, default=lambda: ["RELIANCE", "TCS", "HDFCBANK", "INFY"]
     )
@@ -53,6 +54,40 @@ class BrokerConnection(Base):
     account_id_last4: Mapped[str] = mapped_column(String(4))
     account_name: Mapped[str] = mapped_column(String(120))
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class LiveTradingSession(Base):
+    __tablename__ = "live_trading_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    broker_connection_id: Mapped[str | None] = mapped_column(
+        ForeignKey("broker_connections.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    broker_code: Mapped[str] = mapped_column(String(20))
+    broker_account_last4: Mapped[str] = mapped_column(String(4))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    suspension_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    version: Mapped[int] = mapped_column(default=1)
+
+
+class LiveTradingSessionEvent(Base):
+    __tablename__ = "live_trading_session_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    session_id: Mapped[str] = mapped_column(ForeignKey("live_trading_sessions.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(48))
+    event_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    reason_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    request_id: Mapped[str] = mapped_column(String(36))
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
 
 class EmailToken(Base):

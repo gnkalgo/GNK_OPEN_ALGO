@@ -1,4 +1,8 @@
-import { server } from "./server";
+import {
+  server,
+  type BrokerCode,
+  type LiveTradingStatus,
+} from "./server";
 // Isolated, in-memory simulator. This module never calls a broker or stores credentials.
 export type Scenario =
   | "normal"
@@ -254,6 +258,47 @@ const demo = {
       throw new Error("Broker authorization denied. You can safely try again.");
     emit({ broker: "Connected" });
     record("Paper broker connected");
+  },
+  async liveTradingStatus(): Promise<LiveTradingStatus> {
+    return {
+      mode: "PAPER",
+      live_available: false,
+      live_orders_enabled: false,
+      execution: "paper-only",
+      emergency_stop: false,
+      session_status: "INACTIVE",
+      last_connection_check: null,
+      broker_auth_valid: false,
+      risk_limits: null,
+      blockers: [
+        "OPENALGO_PER_USER_ISOLATION_UNAVAILABLE",
+        "BROKER_AUTH_SESSION_NOT_RETAINED",
+        "LIVE_ORDER_EXECUTION_DISABLED",
+      ],
+      brokers: [],
+      session: null,
+    };
+  },
+  async setTradingMode(_mode: "PAPER" | "LIVE") {
+    throw new Error("Live trading controls require the authenticated server mode.");
+  },
+  async createLiveSession(_brokerCode: BrokerCode) {
+    throw new Error("Live trading controls require the authenticated server mode.");
+  },
+  async confirmLiveSession(_id: string) {
+    throw new Error("Live trading controls require the authenticated server mode.");
+  },
+  async suspendLiveSession(_id: string) {
+    throw new Error("Live trading controls require the authenticated server mode.");
+  },
+  async resumeLiveSession(_id: string) {
+    throw new Error("Live trading controls require the authenticated server mode.");
+  },
+  async endLiveSession(_id: string) {
+    throw new Error("Live trading controls require the authenticated server mode.");
+  },
+  async activateEmergencyStop() {
+    throw new Error("Live trading controls require the authenticated server mode.");
   },
   async submit(ticket: Ticket, key: string) {
     if (requests.has(key)) return requests.get(key)!;

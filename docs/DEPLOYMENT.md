@@ -51,6 +51,14 @@ Broker callback paths have host-Nginx access logging disabled because providers 
 
 Provider references: [OpenAlgo Dhan plugin](https://github.com/marketcalls/openalgo/tree/main/broker/dhan), [OpenAlgo FYERS plugin](https://github.com/marketcalls/openalgo/tree/main/broker/fyers), [OpenAlgo Zerodha plugin](https://github.com/marketcalls/openalgo/tree/main/broker/zerodha), [Dhan partner authentication](https://dhanhq.co/docs/v2/authentication/), [FYERS API v3](https://myapi.fyers.in/docsv3), and [Kite Connect login](https://kite.trade/docs/connect/v3/user/).
 
+### Live-trading control plane status
+
+The dashboard includes a fail-closed live-session control panel, but this deployment has **no OpenAlgo service or per-user OpenAlgo provisioner**. GNK's account-linking workflow discards broker tokens, and a shared OpenAlgo active session is not verified to isolate independent GNK users. Live mode requests are persisted for audit, but confirmation suspends rather than activates the session; the GNK order endpoint remains paper-only. The Emergency Stop can be activated by its user and cleared only by an administrator. Clearing it does not resume a session.
+
+Do not add a shared OpenAlgo API key to the application or enable live order routes. Production live trading requires a reviewed isolation design that maps each GNK user to an upstream broker session, validates account identity and authorization server-side, and proves that upstream order/account requests cannot cross user boundaries. No production live order can be placed by this release.
+
+The control-session expiry defaults to 900 seconds and can be set with `LIVE_SESSION_TTL_SECONDS` (60–86400). Alembic migration `0003` adds the session/event tables and user emergency-stop flag; Compose applies it before the API starts.
+
 ```bash
 # On the Ubuntu server, from the repository root:
 docker compose -f compose.yaml -f compose.production.yaml config --quiet

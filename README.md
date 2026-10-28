@@ -35,12 +35,12 @@ No environment variables are required for the demo. Set VITE_API_MODE=server to 
 
 ## Scope and safety
 
-- The original frontend demo is still isolated. The independent GNK backend now implements authentication, authorization and persisted paper workflows. No OpenAlgo backend, real broker connection, live feed or external order execution is included.
+- The original frontend demo is still isolated. The independent GNK backend implements authentication, authorization and persisted paper workflows plus an audited, fail-closed live-session control plane. No OpenAlgo backend, real broker connection, live feed or external order execution is included.
 - Demo mode uses the typed in-memory adapter; refresh/logout clears its session and ledger. Server mode dispatches to frontend/src/api/server.ts and uses HttpOnly server cookies plus PostgreSQL persistence. Neither mode writes tokens to localStorage/sessionStorage.
 - Demo passwords are public fixture inputs, compared transiently and never stored. This simulator is **not an authentication or authorization system**. Route guards only preview navigation. In server mode, the GNK API enforces sessions, CSRF, roles, account ownership and paper-order validation.
 - All balances, prices, returns, positions, charts and activity are fictional. The dashboard includes clearly illustrative sample positions and performance. Books/portfolio show only actual orders submitted within the current demo session; sample positions are not imported into that ledger.
 - The paper ledger supports filled, rejected and unknown outcomes. Request identifiers prevent duplicate submissions. Unknown orders do not change balance until reconciled and block new orders. Reconciliation resolves the same request rather than resubmitting it.
-- All orders are paper-only and reviewed explicitly. There is no live execution control. A future live mode requires independent server permissions, explicit confirmation, fresh pricing, risk checks and reconciliation.
+- All orders are paper-only and reviewed explicitly. The dashboard can record a live-session request, but cannot activate it: this deployment does not retain broker authentication or provision isolated OpenAlgo sessions per GNK user. Live mode must remain unavailable until per-user isolation, broker identity validation, risk checks, and reconciliation are verified.
 - Fixture fills ignore fees, slippage, tick sizes, partial fills, liquidity, margin and exchange settlement. Sell orders can create a negative net position. Limit orders fill immediately at their entered price. Do not use these calculations for trading decisions.
 - Strategy validation and paper testing exercise configuration and UI transitions only. There is no running engine, historical backtest or profitability claim.
 

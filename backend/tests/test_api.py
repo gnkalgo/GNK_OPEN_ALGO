@@ -1,3 +1,4 @@
+import json
 import secrets
 from datetime import timedelta
 from uuid import uuid4
@@ -441,3 +442,254 @@ def test_gnkalgo_namespace_uses_authenticated_paper_services(client):
     assert cancel.status_code == 409
     assert cancel.json()["detail"]["code"] == "ORDER_NOT_CANCELLABLE"
     assert len(client.get(GNK_ALGO + "/orders").json()["orders"]) == 1
+
+
+def test_live_trading_control_plane_records_requests_but_never_activates(client):
+    from app.models import BrokerConnection, LiveTradingSession, LiveTradingSessionEvent
+
+    login(client)
+    status = client.get(GNK_ALGO + "/trading-mode")
+    assert status.status_code == 200
+    assert status.json()["mode"] == "PAPER"
+    assert status.json()["live_orders_enabled"] is False
+    assert status.json()["session_status"] == "INACTIVE"
+
+    live_mode = client.put(GNK_ALGO + "/trading-mode", json={"mode": "LIVE"})
+    assert live_mode.status_code == 409
+    assert live_mode.json()["detail"]["code"] == "LIVE_TRADING_UNAVAILABLE"
+    assert (
+        client.post(GNK_ALGO + "/live-sessions", json={"broker_code": "dhan"}).status_code
+        == 409
+    )
+
+    with client.db() as db:
+        user = db.scalar(select(User))
+        db.add(
+            BrokerConnection(
+                user_id=user.id,
+                broker_code="dhan",
+                account_id_last4="4321",
+                account_name="Linked Dhan Account",
+            )
+        )
+        db.commit()
+
+    requested = client.post(
+        GNK_ALGO + "/live-sessions",
+        json={"broker_code": "dhan"},
+        headers={"X-Request-ID": str(uuid4())},
+    )
+    assert requested.status_code == 201
+    pending = requested.json()["session"]
+    assert pending["status"] == "PENDING_CONFIRMATION"
+    assert pending["broker_account_mask"] == "•••• 4321"
+    assert pending["broker_auth_valid"] is False
+    assert pending["live_orders_enabled"] is False
+
+    missing_confirmation = client.post(
+        GNK_ALGO + f"/live-sessions/{pending['id']}/confirm",
+        json={"confirmed": False},
+    )
+    assert missing_confirmation.status_code == 400
+    blocked_confirmation = client.post(
+        GNK_ALGO + f"/live-sessions/{pending['id']}/confirm",
+        json={"confirmed": True},
+    )
+    assert blocked_confirmation.status_code == 409
+    assert blocked_confirmation.json()["detail"]["code"] == "LIVE_TRADING_UNAVAILABLE"
+    assert (
+        client.get(GNK_ALGO + "/live-sessions/current").json()["session"]["status"]
+        == "SUSPENDED"
+    )
+    assert (
+        client.post(GNK_ALGO + f"/live-sessions/{pending['id']}/resume").status_code
+        == 409
+    )
+
+    stop = client.post(GNK_ALGO + "/emergency-stop")
+    assert stop.status_code == 200
+    assert stop.json() == {"emergency_stop": True, "live_orders_enabled": False}
+    assert client.post(P + "/brokers/paper/connect").status_code == 200
+    paper_result = client.post(
+        P + "/paper/orders",
+        json=order(),
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert paper_result.status_code == 200
+    assert paper_result.json()["status"] == "Filled"
+    ended = client.post(GNK_ALGO + f"/live-sessions/{pending['id']}/end")
+    assert ended.status_code == 200
+    assert ended.json()["session"]["status"] == "REVOKED"
+
+    events = client.get(GNK_ALGO + f"/live-sessions/{pending['id']}/events")
+    assert events.status_code == 200
+    assert [event["event_type"] for event in events.json()["events"]] == [
+        "SESSION_REQUESTED",
+        "CONFIRMATION_BLOCKED",
+        "RESUME_BLOCKED",
+        "SESSION_REVOKED",
+    ]
+    with client.db() as db:
+        session = db.scalar(select(LiveTradingSession))
+        assert session.activated_at is None
+        assert session.status == "REVOKED"
+        assert db.query(LiveTradingSessionEvent).count() == 4
+        assert db.scalar(select(User)).emergency_stop is True
+
+
+def test_live_session_expiry_and_ownership_are_enforced(client):
+    from datetime import timedelta
+
+    from app.models import BrokerConnection, LiveTradingSession
+
+    login(client)
+    with client.db() as db:
+        user = db.scalar(select(User))
+        connection = BrokerConnection(
+            user_id=user.id,
+            broker_code="dhan",
+            account_id_last4="1234",
+            account_name="Linked Dhan Account",
+        )
+        db.add(connection)
+        db.flush()
+        session = LiveTradingSession(
+            user_id=user.id,
+            broker_connection_id=connection.id,
+            broker_code="dhan",
+            broker_account_last4="1234",
+            status="PENDING_CONFIRMATION",
+            expires_at=now() + timedelta(minutes=5),
+        )
+        db.add(session)
+        db.commit()
+        session_id = session.id
+        user_id = user.id
+
+    with client.db() as db:
+        target = db.get(LiveTradingSession, session_id)
+        target.expires_at = now() - timedelta(seconds=1)
+        other_user = User(
+            name="Other Account",
+            email="other@example.com",
+            password_hash="unused-test-hash",
+            verified=True,
+        )
+        db.add(other_user)
+        db.commit()
+        other_user_id = other_user.id
+
+    from app.security import COOKIE, digest
+
+    other_session = secrets.token_urlsafe(48)
+    client.cache.set(
+        "session:" + digest(other_session),
+        json.dumps(
+            {"user_id": other_user_id, "version": 0, "csrf": "other-csrf"}
+        ),
+        ex=3600,
+    )
+    client.cookies.set(COOKIE, other_session)
+    client.headers["X-CSRF-Token"] = "other-csrf"
+    assert client.get(GNK_ALGO + f"/live-sessions/{session_id}").status_code == 404
+
+    own_session = secrets.token_urlsafe(48)
+    client.cache.set(
+        "session:" + digest(own_session),
+        json.dumps(
+            {"user_id": user_id, "version": 0, "csrf": "owner-csrf"}
+        ),
+        ex=3600,
+    )
+    client.cookies.set(COOKIE, own_session)
+    client.headers["X-CSRF-Token"] = "owner-csrf"
+    status = client.get(GNK_ALGO + "/live-sessions/current")
+    assert status.status_code == 200
+    assert status.json()["session"]["status"] == "EXPIRED"
+
+
+def test_emergency_stop_suspends_pending_session_and_requires_admin_reset(client):
+    from app.models import BrokerConnection
+
+    login(client)
+    with client.db() as db:
+        user = db.scalar(select(User))
+        db.add(
+            BrokerConnection(
+                user_id=user.id,
+                broker_code="dhan",
+                account_id_last4="6789",
+                account_name="Linked Dhan Account",
+            )
+        )
+        db.commit()
+        user_id = user.id
+
+    requested = client.post(
+        GNK_ALGO + "/live-sessions",
+        json={"broker_code": "dhan"},
+    )
+    session_id = requested.json()["session"]["id"]
+    assert client.post(GNK_ALGO + "/emergency-stop").status_code == 200
+    status = client.get(GNK_ALGO + "/live-sessions/current").json()
+    assert status["emergency_stop"] is True
+    assert status["session"]["status"] == "SUSPENDED"
+    assert status["session"]["suspension_reason"] == "EMERGENCY_STOP_ACTIVE"
+    assert (
+        client.delete(GNK_ALGO + f"/admin/users/{user_id}/emergency-stop").status_code
+        == 403
+    )
+    assert (
+        client.post(GNK_ALGO + f"/live-sessions/{session_id}/resume").status_code
+        == 409
+    )
+
+    with client.db() as db:
+        db.get(User, user_id).role = "admin"
+        db.commit()
+    cleared = client.delete(GNK_ALGO + f"/admin/users/{user_id}/emergency-stop")
+    assert cleared.status_code == 200
+    status = client.get(GNK_ALGO + "/trading-mode").json()
+    assert status["emergency_stop"] is False
+    assert status["session"]["status"] == "SUSPENDED"
+    assert status["live_orders_enabled"] is False
+
+
+def test_unlinking_broker_suspends_and_detaches_live_session_request(client):
+    from app.models import BrokerConnection, LiveTradingSession, LiveTradingSessionEvent
+
+    login(client)
+    with client.db() as db:
+        user = db.scalar(select(User))
+        db.add(
+            BrokerConnection(
+                user_id=user.id,
+                broker_code="dhan",
+                account_id_last4="9876",
+                account_name="Linked Dhan Account",
+            )
+        )
+        db.commit()
+    session_id = client.post(
+        GNK_ALGO + "/live-sessions",
+        json={"broker_code": "dhan"},
+    ).json()["session"]["id"]
+
+    unlinked = client.delete(P + "/brokers/dhan")
+    assert unlinked.status_code == 200
+    status = client.get(GNK_ALGO + "/live-sessions/current").json()
+    assert status["session"]["id"] == session_id
+    assert status["session"]["status"] == "SUSPENDED"
+    assert status["session"]["suspension_reason"] == "BROKER_ACCOUNT_UNLINKED"
+    assert status["session"]["broker_account_mask"] == "•••• 9876"
+    with client.db() as db:
+        session = db.get(LiveTradingSession, session_id)
+        assert session.broker_connection_id is None
+        assert (
+            db.scalar(
+                select(LiveTradingSessionEvent).where(
+                    LiveTradingSessionEvent.event_type == "BROKER_ACCOUNT_UNLINKED"
+                )
+            ).event_type
+            == "BROKER_ACCOUNT_UNLINKED"
+        )

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { instruments, money } from "../api/paper";
+import { LiveTradingPanel } from "../components/LiveTradingPanel";
 import { usePaper } from "../hooks";
 import {
   Badge,
@@ -104,6 +105,7 @@ export default function Dashboard() {
         </span>
         <Badge tone="amber">Simulation</Badge>
       </div>
+      <LiveTradingPanel />
       {scenario === "loading" && (
         <div className="loading-line" role="status">
           Loading simulated account snapshot…

@@ -19,6 +19,48 @@ export type BrokerProvider = {
     connected_at: string;
   } | null;
 };
+export type LiveSessionState =
+  | "INACTIVE"
+  | "PENDING_CONFIRMATION"
+  | "ACTIVE"
+  | "SUSPENDED"
+  | "EXPIRED"
+  | "REVOKED";
+export type LiveTradingSession = {
+  id: string;
+  broker_code: BrokerCode;
+  broker_account_mask: string | null;
+  status: LiveSessionState;
+  created_at: string;
+  confirmed_at: string | null;
+  activated_at: string | null;
+  last_validated_at: string | null;
+  expires_at: string;
+  ended_at: string | null;
+  suspension_reason: string | null;
+  broker_auth_valid: false;
+  live_orders_enabled: false;
+};
+export type LiveTradingStatus = {
+  mode: "PAPER";
+  live_available: false;
+  live_orders_enabled: false;
+  execution: "paper-only";
+  emergency_stop: boolean;
+  session_status: LiveSessionState;
+  last_connection_check: null;
+  broker_auth_valid: false;
+  risk_limits: null;
+  blockers: string[];
+  brokers: Array<{
+    code: BrokerCode;
+    name: string;
+    account_mask: string;
+    account_linked: true;
+    broker_auth_valid: false;
+  }>;
+  session: LiveTradingSession | null;
+};
 let state: Snapshot = {
   session: null,
   broker: "Disconnected",
@@ -44,7 +86,10 @@ async function request<T>(
   const abort = new AbortController(),
     timeout = setTimeout(() => abort.abort(), 15000);
   try {
-    const response = await fetch(prefix + path, {
+    const url = path.startsWith("/api/v1/gnkalgo/")
+      ? path
+      : prefix + path;
+    const response = await fetch(url, {
       method,
       credentials: "same-origin",
       cache: "no-store",
@@ -154,6 +199,40 @@ export const server = {
   async disconnectBroker(code: BrokerCode) {
     await request(`/brokers/${code}`, "DELETE");
   },
+  liveTradingStatus: () =>
+    request<LiveTradingStatus>("/api/v1/gnkalgo/trading-mode"),
+  setTradingMode: (mode: "PAPER" | "LIVE") =>
+    request<LiveTradingStatus>("/api/v1/gnkalgo/trading-mode", "PUT", { mode }),
+  createLiveSession: (broker_code: BrokerCode) =>
+    request<{
+      session: LiveTradingSession;
+      live_available: false;
+      live_orders_enabled: false;
+      blockers: string[];
+    }>("/api/v1/gnkalgo/live-sessions", "POST", { broker_code }),
+  confirmLiveSession: (id: string) =>
+    request(
+      `/api/v1/gnkalgo/live-sessions/${encodeURIComponent(id)}/confirm`,
+      "POST",
+      { confirmed: true },
+    ),
+  suspendLiveSession: (id: string) =>
+    request(
+      `/api/v1/gnkalgo/live-sessions/${encodeURIComponent(id)}/suspend`,
+      "POST",
+    ),
+  resumeLiveSession: (id: string) =>
+    request(
+      `/api/v1/gnkalgo/live-sessions/${encodeURIComponent(id)}/resume`,
+      "POST",
+    ),
+  endLiveSession: (id: string) =>
+    request(
+      `/api/v1/gnkalgo/live-sessions/${encodeURIComponent(id)}/end`,
+      "POST",
+    ),
+  activateEmergencyStop: () =>
+    request("/api/v1/gnkalgo/emergency-stop", "POST"),
   async submit(ticket: Ticket, key: string) {
     if (state.orders.some((o) => o.status === "Unknown" && o.id !== key))
       throw new Error(

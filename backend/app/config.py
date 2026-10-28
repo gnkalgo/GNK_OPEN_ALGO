@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://gnk@postgres/gnk"
     redis_url: str = "redis://redis:6379/0"
     session_ttl: int = 28800
+    live_session_ttl_seconds: int = Field(default=900, ge=60, le=86400)
     cookie_secure: bool = True
     smtp_host: str = ""
     smtp_port: int = 587

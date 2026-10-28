@@ -86,3 +86,31 @@ test("server-only controls cannot manufacture roles or demo sessions", () => {
   expect(server.snapshot().session).toEqual(before);
   expect(() => server.explore()).toThrow(/unavailable/);
 });
+
+test("live trading status uses the GNK v1 namespace and reports paper-only execution", async () => {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      mode: "PAPER",
+      live_available: false,
+      live_orders_enabled: false,
+      execution: "paper-only",
+      emergency_stop: false,
+      session_status: "INACTIVE",
+      last_connection_check: null,
+      broker_auth_valid: false,
+      risk_limits: null,
+      blockers: ["OPENALGO_PER_USER_ISOLATION_UNAVAILABLE"],
+      brokers: [],
+      session: null,
+    }),
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const status = await server.liveTradingStatus();
+  expect(status.live_orders_enabled).toBe(false);
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/gnkalgo/trading-mode");
+  expect(fetchMock.mock.calls[0][1]).toMatchObject({
+    credentials: "same-origin",
+    method: "GET",
+  });
+});
