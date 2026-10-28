@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     environment: str = "development"
-    frontend_url: str = "https://www.gnkalgo.com"
+    frontend_url: str = "https://gnkalgo.com"
     database_url: str = "postgresql+psycopg://gnk@postgres/gnk"
     redis_url: str = "redis://redis:6379/0"
     session_ttl: int = 28800

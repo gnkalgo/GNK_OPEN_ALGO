@@ -1,6 +1,6 @@
 # FastAPI / PostgreSQL 17 / Redis 8 deployment
 
-Production frontend origin: **`https://www.gnkalgo.com`** (the apex `https://gnkalgo.com` is also accepted for browser mutations). Put the canonical plain URL in `FRONTEND_URL`; do not include Markdown brackets. This setting controls email-link destinations and the allowed browser mutation origins. Same-origin Nginx proxies `/api/` to FastAPI; wildcard CORS is not enabled.
+Production frontend origin: **`https://gnkalgo.com`** (the `www` hostname is also accepted for browser mutations). Put the canonical plain URL in `FRONTEND_URL`; do not include Markdown brackets. This setting controls email-link destinations and the allowed browser mutation origins. Same-origin Nginx proxies `/api/` to FastAPI; wildcard CORS is not enabled.
 
 ## Services
 
@@ -19,7 +19,7 @@ The base Compose configuration exposes only Nginx on `127.0.0.1:8080`; database,
 
 1. Install Docker Engine/Desktop with its Linux engine running and Compose 2.24.4+ (`!override` is used by the TLS override).
 2. Copy `.env.example` to `.env`. Choose a new random PostgreSQL password and set the matching URL-encoded password in `DATABASE_URL`. Keep `.env` private; it is ignored by Git.
-3. Keep `FRONTEND_URL=https://www.gnkalgo.com`, `ENVIRONMENT=production`, and `COOKIE_SECURE=true`.
+3. Keep `FRONTEND_URL=https://gnkalgo.com`, `ENVIRONMENT=production`, and `COOKIE_SECURE=true`.
 4. Supply SMTP host, port, username/password and sender. Production startup requires configured SMTP with STARTTLS; real email delivery needs a valid sender/provider. No SMTP credentials are supplied with this project.
 5. Supply valid certificates for `www.gnkalgo.com` at `secrets/tls/fullchain.pem` and `secrets/tls/privkey.pem`. This directory is ignored. Configure certificate renewal outside the application and reload Nginx after renewal.
 6. Point the domain to your host and allow 80/443. Inspect existing services before binding those ports.

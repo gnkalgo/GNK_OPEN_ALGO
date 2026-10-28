@@ -104,7 +104,7 @@ def test_registration_accepts_apex_and_www_frontend_origins(client, monkeypatch)
     monkeypatch.setattr(
         app.security,
         "settings",
-        lambda: SimpleNamespace(frontend_url="https://www.gnkalgo.com"),
+        lambda: SimpleNamespace(frontend_url="https://gnkalgo.com"),
     )
     for origin, email in (
         ("https://gnkalgo.com", "apex@example.com"),
