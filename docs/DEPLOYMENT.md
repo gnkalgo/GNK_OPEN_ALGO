@@ -13,22 +13,53 @@ Production frontend origin: **`https://gnkalgo.com`** (the `www` hostname is als
 | migrate | One-shot Alembic upgrade before API startup |
 | worker | Durable PostgreSQL email outbox and bounded SMTP delivery attempts via Redis queue |
 
-The base Compose configuration exposes only Nginx on `127.0.0.1:8080`; database, Redis and API ports are private. API runs as a non-root user. `compose.production.yaml` changes web exposure to 80/443 and mounts TLS configuration/certificates into the same Docker Nginx service. Do not start another Nginx listener on those ports.
+The Compose stack exposes the web container only on `127.0.0.1:8080`; database, Redis and API ports are private. API runs as a non-root user. In production, the host's Nginx owns public ports 80/443 and proxies GNK requests to the Docker web container. This allows other host Nginx sites to keep running without a port conflict.
 
 ## Prepare production
 
-1. Install Docker Engine/Desktop with its Linux engine running and Compose 2.24.4+ (`!override` is used by the TLS override).
+1. Install Docker Engine/Desktop with its Linux engine running and Compose 2.24.4+ (`!override` is used by the production override).
 2. Copy `.env.example` to `.env`. Choose a new random PostgreSQL password and set the matching URL-encoded password in `DATABASE_URL`. Keep `.env` private; it is ignored by Git.
 3. Keep `FRONTEND_URL=https://gnkalgo.com`, `ENVIRONMENT=production`, and `COOKIE_SECURE=true`.
 4. Supply SMTP host, port, username/password and sender. Production startup requires configured SMTP with STARTTLS; real email delivery needs a valid sender/provider. No SMTP credentials are supplied with this project.
-5. Supply valid certificates for `www.gnkalgo.com` at `secrets/tls/fullchain.pem` and `secrets/tls/privkey.pem`. This directory is ignored. Configure certificate renewal outside the application and reload Nginx after renewal.
-6. Point the domain to your host and allow 80/443. Inspect existing services before binding those ports.
+5. Supply valid certificates covering `gnkalgo.com` and `www.gnkalgo.com` at `secrets/tls/fullchain.pem` and `secrets/tls/privkey.pem`. The host Nginx configuration reads these files directly. The directory is ignored; configure certificate renewal and reload host Nginx after renewal.
+6. Point both domains to your host and allow 80/443. The host Nginx must be installed and running; do not bind Docker directly to those ports.
+
+```bash
+# On the Ubuntu server, from the repository root:
+docker compose -f compose.yaml -f compose.production.yaml config --quiet
+docker compose -f compose.yaml -f compose.production.yaml up -d --build
+```
+
+Configure the GNK virtual host in the host's Nginx using [`nginx.host.conf`](../deploy/nginx.host.conf). Review existing files under `/etc/nginx/sites-enabled` first; replace or update only the GNK virtual host, and preserve other sites. Ensure the certificate paths in that file match the actual certificate location. Then validate and reload the host Nginx:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+curl -fsS http://127.0.0.1:8080/api/health/live
+curl -fsS https://gnkalgo.com/api/health/ready
+```
+
+For initial setup only, the GNK virtual host can be installed with:
+
+```bash
+sudo cp deploy/nginx.host.conf /etc/nginx/sites-available/gnkalgo
+sudo ln -sfn /etc/nginx/sites-available/gnkalgo /etc/nginx/sites-enabled/gnkalgo
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Do not install a duplicate GNK server block if an existing GNK site is enabled; update that file instead. Confirm the Docker web mapping is `127.0.0.1:8080->80` and the API is healthy:
+
+```bash
+docker compose -f compose.yaml -f compose.production.yaml ps
+```
+
+For a local, non-production Docker run, the base Compose configuration still binds only to localhost:
 
 ```powershell
 Copy-Item .env.example .env
 # Edit .env privately before continuing.
-docker compose -f compose.yaml -f compose.production.yaml config --quiet
-docker compose -f compose.yaml -f compose.production.yaml up -d --build
+docker compose -f compose.yaml config --quiet
+docker compose -f compose.yaml up -d --build
 docker compose ps
 ```
 

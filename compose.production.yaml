@@ -1,9 +1,5 @@
-# Requires valid certificates in ./secrets/tls; keeps one Docker Nginx listener.
+# Host Nginx owns public ports 80/443 and proxies to this localhost-only listener.
 services:
   web:
     ports: !override
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./deploy/nginx.production.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./secrets/tls:/etc/nginx/tls:ro
+      - '127.0.0.1:8080:80'
