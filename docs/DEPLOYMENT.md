@@ -34,6 +34,29 @@ docker compose ps
 
 Check `https://www.gnkalgo.com/api/health/ready` for readiness. `/api/health/live` reports process health only. This project has not been deployed or tested against that domain.
 
+## Manage the production stack
+
+From the repository root on the Ubuntu server, make the helper executable once:
+
+```bash
+chmod +x deploy/gnk-service.sh
+```
+
+Then use it to manage the stack:
+
+```bash
+./deploy/gnk-service.sh start
+./deploy/gnk-service.sh stop
+./deploy/gnk-service.sh restart api
+./deploy/gnk-service.sh build
+./deploy/gnk-service.sh deploy
+./deploy/gnk-service.sh status
+./deploy/gnk-service.sh logs api
+./deploy/gnk-service.sh health
+```
+
+`deploy` fast-forward pulls `origin/main`, then builds and starts the complete production stack; it runs database migrations through Compose before the API starts. Use `update` instead to build and start from the current local source without pulling. `start` does not rebuild, and `restart` only restarts existing containers. `stop` preserves containers and volumes. The helper does not provide a volume-deleting command.
+
 For local HTTP development, explicitly use `ENVIRONMENT=development`, `COOKIE_SECURE=false`, and `FRONTEND_URL=http://127.0.0.1:8080` in a **local** `.env`. Use the base Compose file without the TLS override. For Vite server development on 5173, use that exact origin instead. The Vite proxy forwards `/api` to local port 8000.
 
 ## Run Python directly
