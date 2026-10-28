@@ -61,6 +61,7 @@ app = FastAPI(
     redoc_url=None,
 )
 PREFIX = "/api/gnk/v1"
+GNK_ALGO_PREFIX = "/api/v1/gnkalgo"
 BROKER_OAUTH_TTL = 300
 QUOTES = {
     "RELIANCE": "2948.50",
@@ -174,6 +175,369 @@ def ready(db: Session = Depends(get_db), cache: Redis = Depends(get_redis)):
     db.execute(text("SELECT 1"))
     cache.ping()
     return {"status": "ready", "execution": "paper-only"}
+
+
+def broker_callback_paths() -> tuple[str, ...]:
+    return ("/api",)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/health")
+def gnkalgo_health():
+    return {"status": "ok", "execution": "paper-only"}
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/status")
+def gnkalgo_status(db: Session = Depends(get_db), cache: Redis = Depends(get_redis)):
+    return ready(db=db, cache=cache)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/brokers")
+def gnkalgo_broker_list(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    return broker_list(user=user, db=db)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/brokers/{{broker_id}}/status")
+def gnkalgo_broker_status(
+    broker_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if broker_id == "paper":
+        return {
+            "code": "paper",
+            "name": "Paper Trading",
+            "configured": True,
+            "connected": user.broker == "Connected",
+            "connection": None,
+        }
+    providers = broker_list(user=user, db=db)["providers"]
+    provider = next((item for item in providers if item["code"] == broker_id), None)
+    if not provider:
+        fail(404, "BROKER_NOT_FOUND", "This broker is not supported.")
+    return {
+        "code": broker_id,
+        "name": provider["name"],
+        "configured": provider["configured"],
+        "connected": provider["connection"] is not None,
+        "connection": provider["connection"],
+    }
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/brokers/{{broker_id}}/connect")
+def gnkalgo_connect(
+    broker_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if broker_id == "paper":
+        return connect(user=user, db=db)
+    if broker_id not in broker_auth.BROKERS:
+        fail(404, "BROKER_NOT_FOUND", "This broker is not supported.")
+    fail(
+        409,
+        "BROKER_EXECUTION_UNAVAILABLE",
+        "This broker supports account linking only; broker order sessions are not available.",
+    )
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/brokers/{{broker_id}}/disconnect")
+def gnkalgo_disconnect(
+    broker_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if broker_id == "paper":
+        user.broker = "Disconnected"
+        audit(db, user, "Paper broker disconnected")
+        db.commit()
+        return {"status": "Disconnected", "source": "paper-simulator"}
+    if broker_id not in broker_auth.BROKERS:
+        fail(404, "BROKER_NOT_FOUND", "This broker is not supported.")
+    return broker_disconnect(code=broker_id, user=user, db=db)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/brokers/{{code}}/authorization")
+def gnkalgo_authorization(
+    code: str,
+    response: Response,
+    user: User = Depends(current_user),
+    cache: Redis = Depends(get_redis),
+):
+    return broker_authorization(code=code, response=response, user=user, cache=cache)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/brokers/{{code}}/callback")
+def gnkalgo_callback(
+    code: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    return broker_callback(code=code, request=request, db=db, cache=cache)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/brokers/pending")
+def gnkalgo_pending(
+    body: BrokerConfirmation,
+    user: User = Depends(current_user),
+    cache: Redis = Depends(get_redis),
+):
+    return broker_pending(body=body, user=user, cache=cache)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/brokers/{{code}}/confirm")
+def gnkalgo_confirm(
+    code: str,
+    body: BrokerConfirmation,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    return broker_confirm(code=code, body=body, user=user, db=db, cache=cache)
+
+
+@app.delete(f"{GNK_ALGO_PREFIX}/brokers/{{code}}")
+def gnkalgo_delete_broker(
+    code: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    return broker_disconnect(code=code, user=user, db=db)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/market/quote")
+def gnkalgo_market_quote(
+    symbol: str | None = None,
+):
+    if symbol:
+        key = symbol.upper()
+        if key not in QUOTES:
+            fail(404, "INVALID_INSTRUMENT", "Instrument not listed.")
+        return {
+            "symbol": key,
+            "exchange": "NSE",
+            "last_price": float(QUOTES[key]),
+            "source": "paper-fixture",
+        }
+    return {
+        "quotes": [
+            {"symbol": key, "exchange": "NSE", "last_price": float(value)}
+            for key, value in QUOTES.items()
+        ]
+    }
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/market/depth")
+def gnkalgo_market_depth(symbol: str = "RELIANCE"):
+    key = symbol.upper()
+    if key not in QUOTES:
+        fail(404, "INVALID_INSTRUMENT", "Instrument not listed.")
+    price = float(QUOTES[key])
+    return {
+        "symbol": key,
+        "exchange": "NSE",
+        "bids": [{"price": price - 0.1, "quantity": 10}],
+        "asks": [{"price": price + 0.1, "quantity": 12}],
+        "last_price": price,
+    }
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/market/history")
+def gnkalgo_market_history(symbol: str = "RELIANCE"):
+    key = symbol.upper()
+    if key not in QUOTES:
+        fail(404, "INVALID_INSTRUMENT", "Instrument not listed.")
+    price = float(QUOTES[key])
+    return {
+        "symbol": key,
+        "exchange": "NSE",
+        "points": [
+            {"time": "2024-01-01T09:15:00Z", "price": price},
+            {"time": "2024-01-01T09:30:00Z", "price": price * 0.995},
+            {"time": "2024-01-01T09:45:00Z", "price": price},
+        ],
+    }
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/market/search")
+def gnkalgo_market_search(symbol: str = "RELIANCE"):
+    key = symbol.upper()
+    return {
+        "query": key,
+        "matches": [
+            {"symbol": item, "exchange": "NSE", "last_price": float(value)}
+            for item, value in QUOTES.items()
+            if key in item or item.startswith(key[:2])
+        ],
+    }
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/orders")
+def gnkalgo_orders(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    orders = db.scalars(
+        select(PaperOrder)
+        .where(PaperOrder.user_id == user.id)
+        .order_by(PaperOrder.created_at.desc())
+    ).all()
+    return {"orders": [order_view(order) for order in orders]}
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/orders")
+def gnkalgo_submit_order(
+    body: Ticket,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    return submit(body=body, request=request, user=user, db=db)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/orders/{{order_id}}")
+def gnkalgo_order_detail(
+    order_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    return reconcile(key=order_id, user=user, db=db)
+
+
+@app.put(f"{GNK_ALGO_PREFIX}/orders/{{order_id}}")
+def gnkalgo_update_order(
+    order_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    order = db.scalar(
+        select(PaperOrder).where(
+            PaperOrder.user_id == user.id,
+            PaperOrder.request_key == order_id,
+        )
+    )
+    if not order:
+        fail(404, "ORDER_NOT_FOUND", "Order not found.")
+    fail(409, "ORDER_NOT_MODIFIABLE", "Paper orders fill immediately and cannot be modified.")
+
+
+@app.delete(f"{GNK_ALGO_PREFIX}/orders/{{order_id}}")
+def gnkalgo_delete_order(
+    order_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    order = db.scalar(
+        select(PaperOrder).where(
+            PaperOrder.user_id == user.id,
+            PaperOrder.request_key == order_id,
+        )
+    )
+    if not order:
+        fail(404, "ORDER_NOT_FOUND", "Order not found.")
+    fail(409, "ORDER_NOT_CANCELLABLE", "Paper orders fill immediately and cannot be cancelled.")
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/portfolio/positions")
+def gnkalgo_positions(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    del db
+    return {"positions": [], "session": public_user(user)}
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/portfolio/holdings")
+def gnkalgo_holdings(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    del db
+    return {"holdings": [], "session": public_user(user)}
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/portfolio/funds")
+def gnkalgo_funds(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    del db
+    return {"available_balance": float(user.balance), "currency": "INR"}
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/session")
+def gnkalgo_session(request: Request, user: User = Depends(current_user)):
+    return session(request=request, user=user)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/auth/register", dependencies=[Depends(same_origin)], status_code=202)
+def gnkalgo_register(
+    body: Registration,
+    request: Request,
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    return register(body=body, request=request, db=db, cache=cache)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/auth/verify", dependencies=[Depends(same_origin)])
+def gnkalgo_verify(body: Token, db: Session = Depends(get_db)):
+    return verify(body=body, db=db)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/auth/login", dependencies=[Depends(same_origin)])
+def gnkalgo_login(
+    body: Login,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    return login(body=body, request=request, response=response, db=db, cache=cache)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/auth/logout")
+def gnkalgo_logout(
+    request: Request,
+    response: Response,
+    user: User = Depends(current_user),
+    cache: Redis = Depends(get_redis),
+):
+    return logout(request=request, response=response, user=user, cache=cache)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/auth/forgot", dependencies=[Depends(same_origin)], status_code=202)
+def gnkalgo_forgot(
+    body: Email,
+    request: Request,
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    return forgot(body=body, request=request, db=db, cache=cache)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/auth/resend", dependencies=[Depends(same_origin)], status_code=202)
+def gnkalgo_resend(
+    body: Email,
+    request: Request,
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    return resend(body=body, request=request, db=db, cache=cache)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/auth/reset", dependencies=[Depends(same_origin)])
+def gnkalgo_reset(body: Reset, db: Session = Depends(get_db)):
+    return reset(body=body, db=db)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/workspace")
+def gnkalgo_workspace(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return workspace(user=user, db=db)
+
+
+@app.put(f"{GNK_ALGO_PREFIX}/profile")
+def gnkalgo_profile(body: Profile, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return profile(body=body, user=user, db=db)
+
+
+@app.put(f"{GNK_ALGO_PREFIX}/watchlist/{{symbol}}")
+def gnkalgo_watchlist(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return watchlist(symbol=symbol, user=user, db=db)
 
 
 @app.post(PREFIX + "/auth/register", dependencies=[Depends(same_origin)], status_code=202)
@@ -403,15 +767,16 @@ def broker_authorization(
         BROKER_OAUTH_TTL,
         json.dumps({"user_id": user.id, "code": code, "provider_data": provider_data}),
     )
-    response.set_cookie(
-        f"gnk_broker_state_{code}",
-        state,
-        max_age=BROKER_OAUTH_TTL,
-        httponly=True,
-        secure=settings().cookie_secure,
-        samesite="lax",
-        path=f"{PREFIX}/brokers/{code}/callback",
-    )
+    for callback_path in broker_callback_paths():
+        response.set_cookie(
+            f"gnk_broker_state_{code}",
+            state,
+            max_age=BROKER_OAUTH_TTL,
+            httponly=True,
+            secure=settings().cookie_secure,
+            samesite="lax",
+            path=callback_path,
+        )
     return {"authorization_url": authorization_url}
 
 
@@ -431,13 +796,14 @@ def broker_callback(
         if pending_token:
             destination += f"#pending={pending_token}"
         result = RedirectResponse(destination, status_code=303)
-        result.delete_cookie(
-            cookie_name,
-            path=f"{PREFIX}/brokers/{code}/callback",
-            secure=settings().cookie_secure,
-            httponly=True,
-            samesite="lax",
-        )
+        for callback_path in broker_callback_paths():
+            result.delete_cookie(
+                cookie_name,
+                path=callback_path,
+                secure=settings().cookie_secure,
+                httponly=True,
+                samesite="lax",
+            )
         return result
 
     if code not in broker_auth.BROKERS:

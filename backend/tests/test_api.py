@@ -8,6 +8,7 @@ from app.models import EmailToken, User, now
 from app.security import digest
 
 P = "/api/gnk/v1"
+GNK_ALGO = "/api/v1/gnkalgo"
 PASSWORD = "FictionalTest!2026"
 
 
@@ -406,3 +407,37 @@ def test_account_disable_revokes_session(client):
         db.scalar(select(User)).enabled = False
         db.commit()
     assert client.get(P + "/session").status_code == 401
+
+
+def test_gnkalgo_namespace_uses_authenticated_paper_services(client):
+    assert client.get(GNK_ALGO + "/health").json()["execution"] == "paper-only"
+    quote = client.get(GNK_ALGO + "/market/quote", params={"symbol": "TCS"})
+    assert quote.status_code == 200
+    assert quote.json()["source"] == "paper-fixture"
+    assert client.get(GNK_ALGO + "/brokers").status_code == 401
+
+    login(client)
+    unavailable = client.post(GNK_ALGO + "/brokers/dhan/connect")
+    assert unavailable.status_code == 409
+    assert unavailable.json()["detail"]["code"] == "BROKER_EXECUTION_UNAVAILABLE"
+    assert (
+        client.get(GNK_ALGO + "/brokers/paper/status").json()["connected"] is False
+    )
+    assert client.post(GNK_ALGO + "/brokers/paper/connect").status_code == 200
+
+    key = str(uuid4())
+    submitted = client.post(
+        GNK_ALGO + "/orders",
+        json=order(),
+        headers={"Idempotency-Key": key},
+    )
+    assert submitted.status_code == 200
+    assert submitted.json()["status"] == "Filled"
+
+    update = client.put(GNK_ALGO + f"/orders/{key}")
+    assert update.status_code == 409
+    assert update.json()["detail"]["code"] == "ORDER_NOT_MODIFIABLE"
+    cancel = client.delete(GNK_ALGO + f"/orders/{key}")
+    assert cancel.status_code == 409
+    assert cancel.json()["detail"]["code"] == "ORDER_NOT_CANCELLABLE"
+    assert len(client.get(GNK_ALGO + "/orders").json()["orders"]) == 1
