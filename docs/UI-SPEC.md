@@ -13,8 +13,9 @@ The routes work in both isolated demo mode and `VITE_API_MODE=server`. In server
 | `/forgot-password` | Public | Email field, generic response, simulated reset-link entry |
 | `/reset-password` | Public | Sample password input, invalid/expired link feedback; valid demo query enables recovery simulation |
 | `/app` | Demo session | Redirects to dashboard |
-| `/app/brokers` | Demo session | Connection badge, consent preview, denial/retry and reconnect; no broker secret fields |
-| `/app/brokers/callback` | Demo session | Consent result/error, reconnect entry and dashboard navigation; query values are demo signals only |
+| `/app/brokers` | Demo session | Paper connection consent preview; no real broker secret fields |
+| `/app/brokers` in server mode | Authenticated account | Dhan, FYERS and Zerodha account-link cards, configuration status, masked account identity, unlink and explicit confirmation; live orders remain disabled |
+| `/app/brokers/callback` | Broker callback | Handles opaque, short-lived confirmation result; never displays or stores provider tokens |
 | `/app/dashboard` | Demo session | Balance, sample P&L, open-position count, active strategies, period chart, watchlist, illustrative positions and recent session activity |
 | `/app/markets` | Demo session | Symbol/company search, watchlist membership toggle, instrument selection, fictional chart and quote, order-entry link; `?symbol=` preserves selection |
 | `/app/orders/new` | Demo session | Buy/sell, instrument, exchange, delivery/intraday, whole quantity, market/limit and price; explicit review and paper submission; blocks expired broker/feed |
@@ -72,4 +73,4 @@ Tables use tabular numerals, compact rows, persistent headers within each table 
 | Unknown order | Amber labeled status, request identifier, explicit reconcile; blocks new orders |
 | Unauthorized | Protected-route redirect or admin access-denied screen |
 
-No credentials are collected for real brokers, no API tokens are displayed, and no live trading control exists. No client-only route or role preview can substitute for server access checks.
+Real broker app credentials stay in backend environment configuration. Provider login secrets are never collected by GNK, access tokens are exchanged server-side and discarded after account identity verification, only a broker display name and masked account identifier are persisted, and no live trading control exists. No client-only route or role preview can substitute for server access checks.

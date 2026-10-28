@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Check, ExternalLink, Link2, ShieldCheck, Unplug } from "lucide-react";
 import { paper, serverMode } from "../api/paper";
+import { server, type BrokerCode, type BrokerProvider } from "../api/server";
 import { useAction, usePaper } from "../hooks";
 import { Badge, Feedback, PageHead, Panel } from "../components/ui";
 export default function Brokers({ callback = false }: { callback?: boolean }) {
@@ -10,12 +11,87 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
     [authorize, setAuthorize] = useState(false),
     [params] = useSearchParams();
   const navigate = useNavigate();
+  const [providers, setProviders] = useState<BrokerProvider[]>([]);
+  const [pendingToken, setPendingToken] = useState("");
+  const [pendingAccount, setPendingAccount] = useState<{
+    code: BrokerCode;
+    name: string;
+    account_name: string;
+    account_mask: string;
+  } | null>(null);
   useEffect(() => {
     if (callback && params.get("error"))
       a.setError(
         "Broker authorization denied. Return to connections and try again.",
       );
   }, [callback, params]);
+  useEffect(() => {
+    if (!serverMode) return;
+    void server
+      .brokers()
+      .then(({ providers: current }) => setProviders(current))
+      .catch((error: unknown) =>
+        a.setError(
+          error instanceof Error
+            ? error.message
+            : "Could not load broker connections.",
+        ),
+      );
+  }, []);
+  useEffect(() => {
+    if (!callback || !serverMode) return;
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const token = fragment.get("pending") ?? "";
+    if (token) {
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
+      setPendingToken(token);
+      void server
+        .brokerPending(token)
+        .then(setPendingAccount)
+        .catch((error: unknown) =>
+          a.setError(
+            error instanceof Error
+              ? error.message
+              : "Broker account confirmation expired. Reconnect and retry.",
+          ),
+        );
+    }
+  }, [callback]);
+
+  async function reloadProviders() {
+    const result = await server.brokers();
+    setProviders(result.providers);
+  }
+
+  async function startBrokerLink(code: BrokerCode) {
+    await a.run(async () => {
+      const { authorization_url } = await server.authorizeBroker(code);
+      window.location.assign(authorization_url);
+    });
+  }
+
+  async function confirmBrokerLink() {
+    if (!pendingAccount || !pendingToken) return;
+    await a.run(async () => {
+      await server.confirmBroker(pendingAccount.code, pendingToken);
+      setPendingToken("");
+      setPendingAccount(null);
+      await reloadProviders();
+      navigate("/app/brokers", { replace: true });
+    }, "Broker account linked. GNK does not retain broker access tokens.");
+  }
+
+  async function disconnectBroker(code: BrokerCode) {
+    await a.run(async () => {
+      await server.disconnectBroker(code);
+      await reloadProviders();
+    }, "Broker account unlinked.");
+  }
+
   return (
     <>
       <PageHead
@@ -23,12 +99,114 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
         title={
           callback ? "Broker authentication callback" : "Broker connections"
         }
-        subtitle="Connect the paper simulator to explore the complete trading workflow."
+        subtitle={
+          serverMode
+            ? "Link your broker account securely. Broker linking does not enable live orders."
+            : "Connect the paper simulator to explore the complete trading workflow."
+        }
       />
       <div className="banner">
-        <ShieldCheck size={18} /> Frontend demo only. No real broker
-        credentials, redirects, or access tokens are used.
+        <ShieldCheck size={18} />
+        {serverMode
+          ? "Broker sign-in is handled by each broker. GNK stores only the account name and a masked ID; access tokens are discarded. Live trading is not enabled."
+          : "Frontend demo only. No real broker credentials, redirects, or access tokens are used."}
       </div>
+      {serverMode && callback && pendingAccount && (
+        <Panel title="Confirm broker account">
+          <div className="broker-card">
+            <Badge tone="amber">Confirmation required</Badge>
+            <h2>{pendingAccount.name}</h2>
+            <p>
+              Authorize linking <strong>{pendingAccount.account_name}</strong>{" "}
+              ({pendingAccount.account_mask}) to your GNK profile.
+            </p>
+            <p>
+              This only records the account link. GNK does not keep the broker
+              access token or submit live orders.
+            </p>
+            <Feedback {...a} />
+            <button
+              className="button primary"
+              disabled={a.busy}
+              onClick={() => void confirmBrokerLink()}
+            >
+              <Check size={16} /> Confirm account link
+            </button>{" "}
+            <Link to="/app/brokers" className="button">
+              Cancel
+            </Link>
+          </div>
+        </Panel>
+      )}
+      {serverMode && (
+        <Panel title="Broker accounts" extra={<Badge>Account link only</Badge>}>
+          <div className="broker-provider-grid">
+            {providers.map((provider) => (
+              <article className="broker-provider" key={provider.code}>
+                <div className="broker-provider-heading">
+                  <h3>{provider.name}</h3>
+                  <Badge
+                    tone={
+                      provider.connection
+                        ? "green"
+                        : provider.configured
+                          ? "amber"
+                          : "neutral"
+                    }
+                  >
+                    {provider.connection
+                      ? "Linked"
+                      : provider.configured
+                        ? "Ready"
+                        : "Not configured"}
+                  </Badge>
+                </div>
+                {provider.connection ? (
+                  <>
+                    <p>{provider.connection.account_name}</p>
+                    <p className="muted">{provider.connection.account_mask}</p>
+                    <button
+                      className="button"
+                      disabled={a.busy}
+                      onClick={() => void disconnectBroker(provider.code)}
+                    >
+                      Unlink account
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      Continue to {provider.name} to authorize account linking.
+                    </p>
+                    <button
+                      className="button primary"
+                      disabled={!provider.configured || a.busy}
+                      onClick={() => void startBrokerLink(provider.code)}
+                    >
+                      <ExternalLink size={15} /> Connect {provider.name}
+                    </button>
+                    {!provider.configured && (
+                      <p className="muted">
+                        Broker app credentials have not been configured by the
+                        administrator.
+                      </p>
+                    )}
+                  </>
+                )}
+              </article>
+            ))}
+            {providers.length === 0 && (
+              <p role="status">Loading broker availability…</p>
+            )}
+          </div>
+          <Feedback {...a} />
+          <p className="muted">
+            Callback codes: <code>dhan</code>, <code>fyers</code>,{" "}
+            <code>zerodha</code>. Configure each broker app with its exact GNK
+            callback URL in the deployment guide.
+          </p>
+        </Panel>
+      )}
       <div className="two-column">
         <Panel
           title="GNK Paper Broker"

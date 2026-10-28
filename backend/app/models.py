@@ -42,6 +42,19 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class BrokerConnection(Base):
+    __tablename__ = "broker_connections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "broker_code", name="uq_broker_connection_user_code"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    broker_code: Mapped[str] = mapped_column(String(20))
+    account_id_last4: Mapped[str] = mapped_column(String(4))
+    account_name: Mapped[str] = mapped_column(String(120))
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class EmailToken(Base):
     __tablename__ = "email_tokens"
     digest: Mapped[str] = mapped_column(String(64), primary_key=True)

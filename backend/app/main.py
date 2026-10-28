@@ -2,21 +2,33 @@ import json
 import secrets
 from datetime import UTC, timedelta
 from decimal import Decimal
+from urllib.parse import parse_qs
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from redis import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from . import broker_auth
 from .config import settings
 from .db import get_db
-from .models import AuditEvent, EmailToken, MailOutbox, PaperOrder, Strategy, User, now
+from .models import (
+    AuditEvent,
+    BrokerConnection,
+    EmailToken,
+    MailOutbox,
+    PaperOrder,
+    Strategy,
+    User,
+    now,
+)
 from .schemas import (
+    BrokerConfirmation,
     Email,
     Login,
     Profile,
@@ -49,6 +61,7 @@ app = FastAPI(
     redoc_url=None,
 )
 PREFIX = "/api/gnk/v1"
+BROKER_OAUTH_TTL = 300
 QUOTES = {
     "RELIANCE": "2948.50",
     "TCS": "4125.80",
@@ -331,6 +344,239 @@ def connect(user: User = Depends(current_user), db: Session = Depends(get_db)):
     audit(db, user, "Paper broker connected")
     db.commit()
     return {"status": "Connected", "source": "paper-simulator"}
+
+
+@app.get(PREFIX + "/brokers")
+def broker_list(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    connections = {
+        item.broker_code: item
+        for item in db.scalars(
+            select(BrokerConnection).where(BrokerConnection.user_id == user.id)
+        )
+    }
+    config = settings()
+    return {
+        "providers": [
+            {
+                "code": code,
+                "name": name,
+                "configured": broker_auth.is_configured(code, config),
+                "connection": (
+                    {
+                        "account_name": connection.account_name,
+                        "account_mask": f"•••• {connection.account_id_last4}",
+                        "connected_at": connection.connected_at.isoformat(),
+                    }
+                    if (connection := connections.get(code))
+                    else None
+                ),
+            }
+            for code, name in broker_auth.BROKERS.items()
+        ],
+        "live_orders_enabled": False,
+    }
+
+
+@app.post(PREFIX + "/brokers/{code}/authorization")
+def broker_authorization(
+    code: str,
+    response: Response,
+    user: User = Depends(current_user),
+    cache: Redis = Depends(get_redis),
+):
+    if code not in broker_auth.BROKERS:
+        fail(404, "BROKER_NOT_FOUND", "This broker is not supported.")
+    state = secrets.token_urlsafe(32)
+    try:
+        authorization_url, provider_data = broker_auth.start_authorization(
+            code, state, settings()
+        )
+    except broker_auth.BrokerNotConfigured:
+        fail(503, "BROKER_NOT_CONFIGURED", "This broker is not configured for account linking.")
+    except broker_auth.BrokerAuthError:
+        fail(502, "BROKER_AUTH_UNAVAILABLE", "Could not start broker authorization. Please retry.")
+    cache.setex(
+        "broker-oauth:" + digest(state),
+        BROKER_OAUTH_TTL,
+        json.dumps({"user_id": user.id, "code": code, "provider_data": provider_data}),
+    )
+    response.set_cookie(
+        f"gnk_broker_state_{code}",
+        state,
+        max_age=BROKER_OAUTH_TTL,
+        httponly=True,
+        secure=settings().cookie_secure,
+        samesite="lax",
+        path=f"{PREFIX}/brokers/{code}/callback",
+    )
+    return {"authorization_url": authorization_url}
+
+
+@app.get(PREFIX + "/brokers/{code}/callback")
+def broker_callback(
+    code: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    cookie_name = f"gnk_broker_state_{code}"
+
+    def redirect_result(*, pending_token: str | None = None, error: bool = False):
+        destination = f"{settings().frontend_url}/app/brokers/callback"
+        if error:
+            destination += "?error=authorization_failed"
+        if pending_token:
+            destination += f"#pending={pending_token}"
+        result = RedirectResponse(destination, status_code=303)
+        result.delete_cookie(
+            cookie_name,
+            path=f"{PREFIX}/brokers/{code}/callback",
+            secure=settings().cookie_secure,
+            httponly=True,
+            samesite="lax",
+        )
+        return result
+
+    if code not in broker_auth.BROKERS:
+        return redirect_result(error=True)
+
+    state = request.cookies.get(cookie_name, "")
+    if not state:
+        return redirect_result(error=True)
+    stored = cache.getdel("broker-oauth:" + digest(state))
+    if not stored:
+        return redirect_result(error=True)
+    try:
+        oauth = json.loads(stored)
+    except (TypeError, json.JSONDecodeError):
+        return redirect_result(error=True)
+    if oauth.get("user_id") is None or oauth.get("code") != code:
+        return redirect_result(error=True)
+
+    params = dict(request.query_params)
+    if code == "fyers":
+        returned_state = params.get("state", "")
+    elif code == "zerodha":
+        returned_state = params.get("state", "")
+        if not returned_state:
+            redirect_params = parse_qs(params.get("redirect_params", ""))
+            returned_state = redirect_params.get("state", [""])[0]
+    else:
+        returned_state = state
+    if (
+        not returned_state
+        or not secrets.compare_digest(state, returned_state)
+        or params.get("error")
+        or params.get("status", "success") != "success"
+        or params.get("s", "ok") != "ok"
+    ):
+        return redirect_result(error=True)
+
+    user = db.get(User, oauth["user_id"])
+    if not user or not user.enabled or not user.verified:
+        return redirect_result(error=True)
+    try:
+        profile = broker_auth.complete_authorization(code, params, settings())
+    except broker_auth.BrokerAuthError:
+        return redirect_result(error=True)
+
+    pending_token = secrets.token_urlsafe(32)
+    cache.setex(
+        "broker-pending:" + digest(pending_token),
+        BROKER_OAUTH_TTL,
+        json.dumps(
+            {
+                "user_id": user.id,
+                "code": code,
+                "account_id_last4": profile.account_id_last4,
+                "account_name": profile.account_name,
+            }
+        ),
+    )
+    return redirect_result(pending_token=pending_token)
+
+
+@app.post(PREFIX + "/brokers/pending")
+def broker_pending(
+    body: BrokerConfirmation,
+    user: User = Depends(current_user),
+    cache: Redis = Depends(get_redis),
+):
+    pending = cache.get("broker-pending:" + digest(body.token))
+    if not pending:
+        fail(404, "BROKER_LINK_EXPIRED", "Broker account confirmation expired. Reconnect and retry.")
+    data = json.loads(pending)
+    if data.get("user_id") != user.id:
+        fail(404, "BROKER_LINK_EXPIRED", "Broker account confirmation expired. Reconnect and retry.")
+    return {
+        "code": data["code"],
+        "name": broker_auth.BROKERS[data["code"]],
+        "account_name": data["account_name"],
+        "account_mask": f"•••• {data['account_id_last4']}",
+    }
+
+
+@app.post(PREFIX + "/brokers/{code}/confirm")
+def broker_confirm(
+    code: str,
+    body: BrokerConfirmation,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    if code not in broker_auth.BROKERS:
+        fail(404, "BROKER_NOT_FOUND", "This broker is not supported.")
+    pending_key = "broker-pending:" + digest(body.token)
+    pending = cache.getdel(pending_key)
+    if not pending:
+        fail(404, "BROKER_LINK_EXPIRED", "Broker account confirmation expired. Reconnect and retry.")
+    data = json.loads(pending)
+    if data.get("user_id") != user.id or data.get("code") != code:
+        fail(404, "BROKER_LINK_EXPIRED", "Broker account confirmation expired. Reconnect and retry.")
+    connection = db.scalar(
+        select(BrokerConnection)
+        .where(BrokerConnection.user_id == user.id, BrokerConnection.broker_code == code)
+        .with_for_update()
+    )
+    if connection:
+        connection.account_id_last4 = data["account_id_last4"]
+        connection.account_name = data["account_name"]
+        connection.connected_at = now()
+    else:
+        db.add(
+            BrokerConnection(
+                user_id=user.id,
+                broker_code=code,
+                account_id_last4=data["account_id_last4"],
+                account_name=data["account_name"],
+            )
+        )
+    audit(db, user, f"{broker_auth.BROKERS[code]} account linked")
+    db.commit()
+    return {"status": "Connected"}
+
+
+@app.delete(PREFIX + "/brokers/{code}")
+def broker_disconnect(
+    code: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if code not in broker_auth.BROKERS:
+        fail(404, "BROKER_NOT_FOUND", "This broker is not supported.")
+    connection = db.scalar(
+        select(BrokerConnection).where(
+            BrokerConnection.user_id == user.id, BrokerConnection.broker_code == code
+        )
+    )
+    if connection:
+        db.delete(connection)
+        audit(db, user, f"{broker_auth.BROKERS[code]} account unlinked")
+        db.commit()
+    return {"status": "Disconnected"}
 
 
 @app.post(PREFIX + "/paper/orders")

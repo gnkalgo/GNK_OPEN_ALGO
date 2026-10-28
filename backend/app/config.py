@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "noreply@gnkalgo.com"
     smtp_starttls: bool = True
+    dhan_partner_id: str = ""
+    dhan_partner_secret: str = ""
+    fyers_client_id: str = ""
+    fyers_app_secret: str = ""
+    zerodha_api_key: str = ""
+    zerodha_api_secret: str = ""
 
     @field_validator("frontend_url")
     @classmethod

@@ -24,6 +24,33 @@ The Compose stack exposes the web container only on `127.0.0.1:8080`; database, 
 5. Supply valid certificates covering `gnkalgo.com` and `www.gnkalgo.com` at `secrets/tls/fullchain.pem` and `secrets/tls/privkey.pem`. The host Nginx configuration reads these files directly. The directory is ignored; configure certificate renewal and reload host Nginx after renewal.
 6. Point both domains to your host and allow 80/443. The host Nginx must be installed and running; do not bind Docker directly to those ports.
 
+### Optional broker account linking
+
+The authenticated Brokers page supports account identity linking for Dhan, FYERS and Zerodha only. It does not submit live orders or retain broker access tokens. Apply for the relevant broker developer/partner credentials and register these exact callback URLs in each provider application:
+
+```text
+https://gnkalgo.com/api/gnk/v1/brokers/dhan/callback
+https://gnkalgo.com/api/gnk/v1/brokers/fyers/callback
+https://gnkalgo.com/api/gnk/v1/brokers/zerodha/callback
+```
+
+The broker code in each callback path must match exactly: `dhan`, `fyers`, or `zerodha`. OpenAlgo's local `http://127.0.0.1:5000/<code>/callback` is not a GNK production callback URL. Configure the provider credentials only in the backend environment, never in Vite variables or frontend code:
+
+```dotenv
+DHAN_PARTNER_ID=
+DHAN_PARTNER_SECRET=
+FYERS_CLIENT_ID=
+FYERS_APP_SECRET=
+ZERODHA_API_KEY=
+ZERODHA_API_SECRET=
+```
+
+Keep the production environment file private and restrict its filesystem permissions (for example, `chmod 600 .env`). Dhan account linking requires Dhan's approved partner consent flow; ordinary individual Dhan access tokens are not accepted. The OAuth callback exchanges credentials server-side, displays the broker account name and masked final four characters for explicit confirmation, then discards access tokens. Only that minimal identity is stored. The feature does not refresh or revoke broker sessions and does not provide trading access. Follow each broker's current developer terms and seek qualified advice about applicable SEBI/exchange obligations before offering any trading service.
+
+Broker callback paths have host-Nginx access logging disabled because providers return one-time authorization values in callback URLs. Keep that logging exception if changing the host Nginx configuration.
+
+Provider references: [OpenAlgo Dhan plugin](https://github.com/marketcalls/openalgo/tree/main/broker/dhan), [OpenAlgo FYERS plugin](https://github.com/marketcalls/openalgo/tree/main/broker/fyers), [OpenAlgo Zerodha plugin](https://github.com/marketcalls/openalgo/tree/main/broker/zerodha), [Dhan partner authentication](https://dhanhq.co/docs/v2/authentication/), [FYERS API v3](https://myapi.fyers.in/docsv3), and [Kite Connect login](https://kite.trade/docs/connect/v3/user/).
+
 ```bash
 # On the Ubuntu server, from the repository root:
 docker compose -f compose.yaml -f compose.production.yaml config --quiet

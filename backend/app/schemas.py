@@ -76,3 +76,7 @@ class Transition(Body):
 
 class UserStatus(Body):
     enabled: bool
+
+
+class BrokerConfirmation(Body):
+    token: str = Field(min_length=32, max_length=128)

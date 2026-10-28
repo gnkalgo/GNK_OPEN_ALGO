@@ -8,6 +8,17 @@ class ApiError extends Error {
     super(message);
   }
 }
+export type BrokerCode = "dhan" | "fyers" | "zerodha";
+export type BrokerProvider = {
+  code: BrokerCode;
+  name: string;
+  configured: boolean;
+  connection: {
+    account_name: string;
+    account_mask: string;
+    connected_at: string;
+  } | null;
+};
 let state: Snapshot = {
   session: null,
   broker: "Disconnected",
@@ -121,6 +132,27 @@ export const server = {
   async connect() {
     await request("/brokers/paper/connect", "POST");
     await refresh();
+  },
+  brokers: async () =>
+    request<{ providers: BrokerProvider[]; live_orders_enabled: false }>("/brokers"),
+  async authorizeBroker(code: BrokerCode) {
+    return request<{ authorization_url: string }>(
+      `/brokers/${code}/authorization`,
+      "POST",
+    );
+  },
+  brokerPending: (token: string) =>
+    request<{
+      code: BrokerCode;
+      name: string;
+      account_name: string;
+      account_mask: string;
+    }>("/brokers/pending", "POST", { token }),
+  async confirmBroker(code: BrokerCode, token: string) {
+    await request(`/brokers/${code}/confirm`, "POST", { token });
+  },
+  async disconnectBroker(code: BrokerCode) {
+    await request(`/brokers/${code}`, "DELETE");
   },
   async submit(ticket: Ticket, key: string) {
     if (state.orders.some((o) => o.status === "Unknown" && o.id !== key))

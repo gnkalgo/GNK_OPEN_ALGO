@@ -96,6 +96,108 @@ def test_csrf_origin_and_admin_are_enforced_by_server(client):
     assert client.post(P + "/brokers/paper/connect").status_code == 200
 
 
+def test_broker_account_link_is_confirmed_and_never_persists_tokens(client, monkeypatch):
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs, urlencode, urlsplit
+
+    import app.main
+    from app import broker_auth
+    from app.models import BrokerConnection
+
+    config = SimpleNamespace(
+        frontend_url="http://testserver",
+        cookie_secure=False,
+        session_ttl=28800,
+        dhan_partner_id="dhan-id",
+        dhan_partner_secret="dhan-secret",
+        fyers_client_id="fyers-id",
+        fyers_app_secret="fyers-secret",
+        zerodha_api_key="zerodha-key",
+        zerodha_api_secret="zerodha-secret",
+    )
+    monkeypatch.setattr(app.main, "settings", lambda: config)
+    monkeypatch.setattr(
+        broker_auth,
+        "start_authorization",
+        lambda code, state, settings: ("https://kite.example/login", {}),
+    )
+    monkeypatch.setattr(
+        broker_auth,
+        "complete_authorization",
+        lambda code, params, settings: broker_auth.BrokerProfile(
+            "1234", "Paper Test Account"
+        ),
+    )
+    login(client)
+
+    start = client.post(P + "/brokers/zerodha/authorization")
+    assert start.status_code == 200
+    assert start.json()["authorization_url"] == "https://kite.example/login"
+    state = client.cookies.get("gnk_broker_state_zerodha")
+    assert state
+
+    callback = client.get(
+        P + "/brokers/zerodha/callback",
+        params={
+            "status": "success",
+            "request_token": "one-time-request-token",
+            "redirect_params": urlencode({"state": state}),
+        },
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"].startswith(
+        "http://testserver/app/brokers/callback#pending="
+    )
+    pending_token = parse_qs(urlsplit(callback.headers["location"]).fragment)["pending"][0]
+    with client.db() as db:
+        assert db.query(BrokerConnection).count() == 0
+
+    pending = client.post(P + "/brokers/pending", json={"token": pending_token})
+    assert pending.status_code == 200
+    assert pending.json()["account_mask"] == "•••• 1234"
+    assert pending.json()["account_name"] == "Paper Test Account"
+
+    confirmed = client.post(
+        P + "/brokers/zerodha/confirm", json={"token": pending_token}
+    )
+    assert confirmed.status_code == 200
+    assert client.post(
+        P + "/brokers/zerodha/confirm", json={"token": pending_token}
+    ).status_code == 404
+
+    columns = BrokerConnection.__table__.columns.keys()
+    assert "access_token" not in columns and "api_secret" not in columns
+    linked = client.get(P + "/brokers").json()
+    zerodha = next(item for item in linked["providers"] if item["code"] == "zerodha")
+    assert zerodha["connection"]["account_name"] == "Paper Test Account"
+    assert linked["live_orders_enabled"] is False
+    assert client.delete(P + "/brokers/zerodha").status_code == 200
+
+
+def test_broker_authorization_rejects_unconfigured_provider(client, monkeypatch):
+    from types import SimpleNamespace
+
+    import app.main
+
+    config = SimpleNamespace(
+        frontend_url="http://testserver",
+        cookie_secure=False,
+        session_ttl=28800,
+        dhan_partner_id="",
+        dhan_partner_secret="",
+        fyers_client_id="",
+        fyers_app_secret="",
+        zerodha_api_key="",
+        zerodha_api_secret="",
+    )
+    monkeypatch.setattr(app.main, "settings", lambda: config)
+    login(client)
+    response = client.post(P + "/brokers/dhan/authorization")
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "BROKER_NOT_CONFIGURED"
+
+
 def test_registration_accepts_apex_and_www_frontend_origins(client, monkeypatch):
     from types import SimpleNamespace
 

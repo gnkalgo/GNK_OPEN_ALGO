@@ -1482,6 +1482,36 @@ dialog::backdrop {
 .broker-card {
   padding: 28px;
 }
+.broker-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 14px;
+  padding: 18px;
+}
+.broker-provider {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 18px;
+  background: var(--surface);
+}
+.broker-provider-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.broker-provider-heading h3 {
+  margin: 4px 0;
+}
+.broker-provider .button {
+  margin-top: 8px;
+}
+.broker-provider .muted {
+  color: var(--muted);
+  font-size: 12px;
+}
 .broker-mark {
   display: flex;
   align-items: center;

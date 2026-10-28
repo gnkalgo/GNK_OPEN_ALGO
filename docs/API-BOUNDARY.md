@@ -13,6 +13,11 @@
 | `POST /auth/forgot`, `/auth/reset` | Generic email response; single-use reset, password hash replacement, session revocation |
 | `GET /workspace` | Current user's paper balance, orders, strategies, watchlist and audit activity |
 | `POST /brokers/paper/connect` | Connect the server's paper simulator only |
+| `GET /brokers` | List configured Dhan, FYERS and Zerodha account links (masked identifiers only) |
+| `POST /brokers/:code/authorization` | Start provider authorization with one-time state and an HttpOnly callback cookie |
+| `GET /brokers/:code/callback` | Validate provider callback, exchange authorization server-side and create a short-lived confirmation |
+| `POST /brokers/pending` | Read the authorized account identity before explicit user confirmation |
+| `POST /brokers/:code/confirm`; `DELETE /brokers/:code` | Link or unlink account metadata; no broker token is persisted |
 | `POST /paper/orders` | Ticket plus UUID `Idempotency-Key`; locked PostgreSQL balance update and durable deduplication |
 | `GET /paper/orders/:key` | Read committed result for that user's original request; 404 leaves unknown client outcomes unresolved |
 | `PUT /profile` | Update validated name |
@@ -24,7 +29,7 @@
 
 All public auth POSTs require the configured `Origin`; authenticated mutations also require `X-CSRF-Token`. The client sends cookies with `credentials: same-origin`. No session or broker token enters browser storage. Server errors return `detail: {code, message}` and validation errors omit submitted values. Server-mode demo-role/scenario controls are absent and cannot assign authority. Session and role checks are enforced in `backend/app/security.py` on every request.
 
-The server adapter preserves an uncertain order response as Unknown with the original idempotency key and blocks a new request until reconciliation. The backend's paper fills are transactional and immediate; no real exchange outcome is modeled. Strategies are configuration/lifecycle records, not running trading algorithms. Market quotes remain explicitly fictional frontend/server fixtures. No production market feed, broker OAuth, account deletion, MFA or live execution API exists.
+The server adapter preserves an uncertain order response as Unknown with the original idempotency key and blocks a new request until reconciliation. The backend's paper fills are transactional and immediate; no real exchange outcome is modeled. Strategies are configuration/lifecycle records, not running trading algorithms. Market quotes remain explicitly fictional frontend/server fixtures. Dhan, FYERS and Zerodha flows only verify a broker account and store its display name plus masked identifier; access tokens are transient and discarded, and no live order API exists. Broker app credentials are read from server environment variables and must not be sent to the browser. Account linking does not establish regulatory approval or enable client trading.
 
 The remaining sections describe the retained isolated demo and historical proposal, not additional implemented endpoints.
 
