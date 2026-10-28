@@ -1,6 +1,6 @@
 # FastAPI / PostgreSQL 17 / Redis 8 deployment
 
-Production frontend origin: **`https://www.gnkalgo.com`**. Put the plain URL in `FRONTEND_URL`; do not include Markdown brackets. This setting controls allowed browser mutation origins and email-link destinations. Same-origin Nginx proxies `/api/` to FastAPI; wildcard CORS is not enabled.
+Production frontend origin: **`https://www.gnkalgo.com`** (the apex `https://gnkalgo.com` is also accepted for browser mutations). Put the canonical plain URL in `FRONTEND_URL`; do not include Markdown brackets. This setting controls email-link destinations and the allowed browser mutation origins. Same-origin Nginx proxies `/api/` to FastAPI; wildcard CORS is not enabled.
 
 ## Services
 

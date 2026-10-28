@@ -96,6 +96,38 @@ def test_csrf_origin_and_admin_are_enforced_by_server(client):
     assert client.post(P + "/brokers/paper/connect").status_code == 200
 
 
+def test_registration_accepts_apex_and_www_frontend_origins(client, monkeypatch):
+    from types import SimpleNamespace
+
+    import app.security
+
+    monkeypatch.setattr(
+        app.security,
+        "settings",
+        lambda: SimpleNamespace(frontend_url="https://www.gnkalgo.com"),
+    )
+    for origin, email in (
+        ("https://gnkalgo.com", "apex@example.com"),
+        ("https://www.gnkalgo.com", "www@example.com"),
+    ):
+        assert (
+            client.post(
+                P + "/auth/register",
+                headers={"Origin": origin},
+                json={"name": "Demo", "email": email, "password": PASSWORD},
+            ).status_code
+            == 202
+        )
+    assert (
+        client.post(
+            P + "/auth/register",
+            headers={"Origin": "https://evil.example"},
+            json={"name": "Demo", "email": "evil@example.com", "password": PASSWORD},
+        ).status_code
+        == 403
+    )
+
+
 def test_expired_and_replayed_email_links(client):
     client.post(
         P + "/auth/register",

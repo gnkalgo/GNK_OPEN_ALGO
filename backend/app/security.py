@@ -1,6 +1,7 @@
 import hashlib
 import json
 import secrets
+from urllib.parse import urlsplit, urlunsplit
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
@@ -42,7 +43,22 @@ def verify_password(encoded: str, raw: str):
 
 
 def same_origin(request: Request):
-    if request.headers.get("origin") != settings().frontend_url:
+    frontend_url = settings().frontend_url
+    allowed_origins = {frontend_url}
+    frontend = urlsplit(frontend_url)
+    if frontend.hostname == "www.gnkalgo.com":
+        allowed_origins.add(
+            urlunsplit(
+                (frontend.scheme, frontend.netloc.removeprefix("www."), "", "", "")
+            )
+        )
+    elif frontend.hostname == "gnkalgo.com":
+        allowed_origins.add(
+            urlunsplit(
+                (frontend.scheme, f"www.{frontend.netloc}", "", "", "")
+            )
+        )
+    if request.headers.get("origin") not in allowed_origins:
         fail(403, "ORIGIN_DENIED", "Request origin is not allowed.")
 
 
