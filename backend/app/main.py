@@ -1,0 +1,556 @@
+import json
+import secrets
+from datetime import UTC, timedelta
+from decimal import Decimal
+from uuid import UUID
+
+from fastapi import Depends, FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from redis import Redis
+from redis.exceptions import RedisError
+from sqlalchemy import select, text, update
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from .config import settings
+from .db import get_db
+from .models import AuditEvent, EmailToken, MailOutbox, PaperOrder, Strategy, User, now
+from .schemas import (
+    Email,
+    Login,
+    Profile,
+    Registration,
+    Reset,
+    StrategyConfig,
+    Ticket,
+    Token,
+    Transition,
+    UserStatus,
+)
+from .security import (
+    COOKIE,
+    DUMMY_HASH,
+    admin_user,
+    current_user,
+    digest,
+    fail,
+    get_redis,
+    passwords,
+    rate_limit,
+    same_origin,
+    verify_password,
+)
+
+app = FastAPI(
+    title="GNK ALGO API",
+    version="1.0.0",
+    docs_url="/api/docs" if settings().environment != "production" else None,
+    redoc_url=None,
+)
+PREFIX = "/api/gnk/v1"
+QUOTES = {
+    "RELIANCE": "2948.50",
+    "TCS": "4125.80",
+    "HDFCBANK": "1726.35",
+    "INFY": "1864.20",
+    "ICICIBANK": "1285.40",
+    "BHARTIARTL": "1620.75",
+}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exc):
+    # Pydantic errors may include submitted passwords. Return only field paths.
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": {
+                "code": "VALIDATION_ERROR",
+                "message": "Invalid fields: "
+                + ", ".join(".".join(map(str, e["loc"][1:])) for e in exc.errors()),
+            }
+        },
+    )
+
+
+@app.exception_handler(RedisError)
+async def redis_error(request, exc):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": {
+                "code": "SERVICE_UNAVAILABLE",
+                "message": "Session service unavailable. Please retry later.",
+            }
+        },
+    )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def database_error(request, exc):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": {
+                "code": "SERVICE_UNAVAILABLE",
+                "message": "Data service unavailable. Please retry later.",
+            }
+        },
+    )
+
+
+def audit(db, user, action):
+    db.add(AuditEvent(user_id=user.id, action=action))
+
+
+def public_user(user):
+    return {"name": user.name, "email": user.email, "role": user.role}
+
+
+def order_view(o):
+    return {
+        **{k: v for k, v in o.ticket.items() if k != "request"},
+        "id": o.request_key,
+        "status": o.status,
+        "time": o.created_at.isoformat(),
+        "reason": o.reason,
+    }
+
+
+def queue_email(db, user, purpose):
+    token = EmailToken(
+        digest=digest(secrets.token_urlsafe(32)),
+        user_id=user.id,
+        purpose=purpose,
+        expires_at=now() + timedelta(minutes=30),
+    )
+    db.add(token)
+    db.flush()
+    db.add(MailOutbox(token_digest=token.digest))
+
+
+def consume_token(db, raw, purpose):
+    token = db.scalar(
+        select(EmailToken)
+        .where(EmailToken.digest == digest(raw), EmailToken.purpose == purpose)
+        .with_for_update()
+    )
+    if not token or token.used or token.expires_at.replace(tzinfo=UTC) <= now():
+        fail(400, "LINK_EXPIRED", "Link is invalid or expired. Request a new link.")
+    token.used = True
+    return db.scalar(select(User).where(User.id == token.user_id).with_for_update())
+
+
+@app.get("/api/health/live")
+def live():
+    return {"status": "ok", "execution": "paper-only"}
+
+
+@app.get("/api/health/ready")
+def ready(db: Session = Depends(get_db), cache: Redis = Depends(get_redis)):
+    db.execute(text("SELECT 1"))
+    cache.ping()
+    return {"status": "ready", "execution": "paper-only"}
+
+
+@app.post(PREFIX + "/auth/register", dependencies=[Depends(same_origin)], status_code=202)
+def register(
+    body: Registration,
+    request: Request,
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    rate_limit(request, cache)
+    encoded = passwords.hash(body.password)
+    if not db.scalar(select(User).where(User.email == body.email)):
+        user = User(name=body.name.strip(), email=body.email, password_hash=encoded)
+        db.add(user)
+        try:
+            db.flush()
+            queue_email(db, user, "verify")
+            audit(db, user, "Account registration requested")
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+    return {"message": "If eligible, a verification email will be sent."}
+
+
+@app.post(PREFIX + "/auth/verify", dependencies=[Depends(same_origin)])
+def verify(body: Token, db: Session = Depends(get_db)):
+    user = consume_token(db, body.token, "verify")
+    user.verified = True
+    audit(db, user, "Email verified")
+    db.commit()
+    return {"message": "Email verified. Sign in."}
+
+
+@app.post(PREFIX + "/auth/login", dependencies=[Depends(same_origin)])
+def login(
+    body: Login,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    rate_limit(request, cache)
+    user = db.scalar(select(User).where(User.email == body.email))
+    valid = verify_password(user.password_hash if user else DUMMY_HASH, body.password)
+    if not user or not valid or not user.verified or not user.enabled:
+        fail(
+            401,
+            "LOGIN_FAILED",
+            "Email or password is incorrect, or the account is not verified.",
+        )
+    old = request.cookies.get(COOKIE)
+    if old:
+        cache.delete("session:" + digest(old))
+    raw, csrf = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
+    cache.setex(
+        "session:" + digest(raw),
+        settings().session_ttl,
+        json.dumps({"user_id": user.id, "version": user.session_version, "csrf": csrf}),
+    )
+    response.set_cookie(
+        COOKIE,
+        raw,
+        max_age=settings().session_ttl,
+        httponly=True,
+        secure=settings().cookie_secure,
+        samesite="strict",
+        path="/api",
+    )
+    audit(db, user, "Signed in")
+    db.commit()
+    return {"session": public_user(user), "csrf": csrf}
+
+
+@app.get(PREFIX + "/session")
+def session(request: Request, user: User = Depends(current_user)):
+    return {"session": public_user(user), "csrf": request.state.csrf}
+
+
+@app.post(PREFIX + "/auth/logout")
+def logout(
+    request: Request,
+    response: Response,
+    user: User = Depends(current_user),
+    cache: Redis = Depends(get_redis),
+):
+    cache.delete("session:" + digest(request.cookies.get(COOKIE, "")))
+    response.delete_cookie(
+        COOKIE,
+        path="/api",
+        secure=settings().cookie_secure,
+        httponly=True,
+        samesite="strict",
+    )
+    return {"message": "Signed out."}
+
+
+@app.post(PREFIX + "/auth/forgot", dependencies=[Depends(same_origin)], status_code=202)
+def forgot(
+    body: Email,
+    request: Request,
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    rate_limit(request, cache)
+    user = db.scalar(select(User).where(User.email == str(body.email).lower()))
+    if user and user.enabled:
+        queue_email(db, user, "reset")
+        db.commit()
+    return {"message": "If an account exists, a reset email will be sent."}
+
+
+@app.post(PREFIX + "/auth/resend", dependencies=[Depends(same_origin)], status_code=202)
+def resend(
+    body: Email, request: Request, db: Session = Depends(get_db), cache: Redis = Depends(get_redis)
+):
+    rate_limit(request, cache)
+    user = db.scalar(select(User).where(User.email == str(body.email).lower()))
+    if user and user.enabled and not user.verified:
+        queue_email(db, user, "verify")
+        db.commit()
+    return {"message": "If eligible, a verification email will be sent."}
+
+
+@app.post(PREFIX + "/auth/reset", dependencies=[Depends(same_origin)])
+def reset(body: Reset, db: Session = Depends(get_db)):
+    user = consume_token(db, body.token, "reset")
+    user.password_hash = passwords.hash(body.password)
+    user.session_version += 1
+    db.execute(
+        update(EmailToken)
+        .where(EmailToken.user_id == user.id, EmailToken.purpose == "reset")
+        .values(used=True)
+    )
+    audit(db, user, "Password reset; sessions revoked")
+    db.commit()
+    return {"message": "Password reset. Sign in again."}
+
+
+@app.get(PREFIX + "/workspace")
+def workspace(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    orders = db.scalars(
+        select(PaperOrder)
+        .where(PaperOrder.user_id == user.id)
+        .order_by(PaperOrder.created_at.desc())
+    ).all()
+    strategies = db.scalars(select(Strategy).where(Strategy.user_id == user.id)).all()
+    events = db.scalars(
+        select(AuditEvent)
+        .where(AuditEvent.user_id == user.id)
+        .order_by(AuditEvent.created_at.desc())
+        .limit(20)
+    ).all()
+    return {
+        "session": public_user(user),
+        "broker": user.broker,
+        "balance": float(user.balance),
+        "orders": [order_view(o) for o in orders],
+        "strategies": [{**s.config, "id": s.id, "status": s.status} for s in strategies],
+        "watchlist": user.watchlist,
+        "activity": [e.action for e in events],
+        "scenario": "normal",
+    }
+
+
+@app.post(PREFIX + "/brokers/paper/connect")
+def connect(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    user.broker = "Connected"
+    audit(db, user, "Paper broker connected")
+    db.commit()
+    return {"status": "Connected", "source": "paper-simulator"}
+
+
+@app.post(PREFIX + "/paper/orders")
+def submit(
+    body: Ticket,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        key = str(UUID(request.headers.get("idempotency-key", "")))
+    except ValueError:
+        fail(422, "INVALID_REQUEST_KEY", "A UUID Idempotency-Key is required.")
+    # Lock the account before checking the key; this serializes balance effects per user.
+    user = db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    existing = db.scalar(
+        select(PaperOrder).where(PaperOrder.user_id == user.id, PaperOrder.request_key == key)
+    )
+    submitted = body.model_dump(mode="json")
+    if existing:
+        if existing.ticket.get("request") != submitted:
+            fail(
+                409,
+                "IDEMPOTENCY_CONFLICT",
+                "Request key was already used for different order parameters.",
+            )
+        return order_view(existing)
+    if user.broker != "Connected":
+        fail(409, "BROKER_EXPIRED", "Connect the paper broker first.")
+    if (
+        body.symbol not in QUOTES
+        or body.exchange != "NSE"
+        or (body.type == "LIMIT" and body.price <= 0)
+    ):
+        fail(422, "INVALID_INSTRUMENT", "Invalid listed instrument, exchange or price.")
+    price = Decimal(QUOTES[body.symbol]) if body.type == "MARKET" else body.price
+    value = price * body.quantity
+    rejected = body.side == "BUY" and value > user.balance
+    ticket = {**submitted, "price": float(price), "request": submitted}
+    order = PaperOrder(
+        user_id=user.id,
+        request_key=key,
+        ticket=ticket,
+        status="Rejected" if rejected else "Filled",
+        reason="Insufficient paper balance" if rejected else None,
+    )
+    db.add(order)
+    if not rejected:
+        user.balance -= value * (1 if body.side == "BUY" else -1)
+    audit(db, user, f"{body.symbol} · {body.side} {body.quantity} · {order.status}")
+    db.commit()
+    return order_view(order)
+
+
+@app.get(PREFIX + "/paper/orders/{key}")
+def reconcile(key: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    order = db.scalar(
+        select(PaperOrder).where(PaperOrder.user_id == user.id, PaperOrder.request_key == key)
+    )
+    if not order:
+        fail(
+            404,
+            "ORDER_NOT_FOUND",
+            "No committed order found for this request. Retry with the same request key.",
+        )
+    return order_view(order)
+
+
+@app.put(PREFIX + "/profile")
+def profile(body: Profile, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    user.name = body.name.strip()
+    audit(db, user, "Profile updated")
+    db.commit()
+    return public_user(user)
+
+
+@app.put(PREFIX + "/watchlist/{symbol}")
+def watchlist(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if symbol not in QUOTES:
+        fail(422, "INVALID_INSTRUMENT", "Instrument not listed.")
+    user = db.scalar(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    user.watchlist = (
+        [s for s in user.watchlist if s != symbol]
+        if symbol in user.watchlist
+        else [*user.watchlist, symbol]
+    )
+    db.commit()
+    return user.watchlist
+
+
+@app.post(PREFIX + "/strategies")
+@app.put(PREFIX + "/strategies/{strategy_id}")
+def save_strategy(
+    body: StrategyConfig,
+    strategy_id: str | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if body.symbol not in QUOTES or not body.name.strip():
+        fail(
+            422,
+            "INVALID_CONFIGURATION",
+            "Use a listed instrument and a nonempty strategy name.",
+        )
+    strategy = (
+        db.scalar(
+            select(Strategy)
+            .where(Strategy.id == strategy_id, Strategy.user_id == user.id)
+            .with_for_update()
+        )
+        if strategy_id
+        else Strategy(user_id=user.id)
+    )
+    if not strategy:
+        fail(404, "NOT_FOUND", "Strategy not found.")
+    if strategy.status == "Active":
+        fail(409, "ACTIVE_STRATEGY", "Pause the strategy before editing.")
+    strategy.config = {**body.model_dump(mode="json"), "loss": float(body.loss)}
+    strategy.status = "Draft"
+    db.add(strategy)
+    audit(db, user, "Strategy configuration saved")
+    db.commit()
+    return {"id": strategy.id}
+
+
+@app.post(PREFIX + "/strategies/{strategy_id}/transition")
+def transition(
+    strategy_id: str,
+    body: Transition,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    strategy = db.scalar(
+        select(Strategy)
+        .where(Strategy.id == strategy_id, Strategy.user_id == user.id)
+        .with_for_update()
+    )
+    allowed = {
+        "Draft": ["Validated"],
+        "Validated": ["Tested"],
+        "Tested": ["Active"],
+        "Active": ["Paused", "Stopped"],
+        "Paused": ["Active", "Stopped"],
+        "Stopped": ["Validated"],
+    }
+    if not strategy:
+        fail(404, "NOT_FOUND", "Strategy not found.")
+    if body.status not in allowed[strategy.status]:
+        fail(409, "INVALID_TRANSITION", "Validate and paper test before activation.")
+    if body.status == "Active" and user.broker != "Connected":
+        fail(409, "BROKER_EXPIRED", "Connect the paper broker first.")
+    strategy.status = body.status
+    audit(db, user, f"Strategy {body.status}")
+    db.commit()
+    return {"status": strategy.status, "engine": "lifecycle-only; no trading engine"}
+
+
+@app.get(PREFIX + "/admin/users")
+def users(user: User = Depends(admin_user), db: Session = Depends(get_db)):
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "role": u.role,
+            "enabled": u.enabled,
+        }
+        for u in db.scalars(select(User).limit(100)).all()
+    ]
+
+
+@app.patch(PREFIX + "/admin/users/{user_id}")
+def user_status(
+    user_id: str,
+    body: UserStatus,
+    user: User = Depends(admin_user),
+    db: Session = Depends(get_db),
+):
+    target = db.get(User, user_id)
+    if not target:
+        fail(404, "NOT_FOUND", "User not found.")
+    if target.id == user.id:
+        fail(409, "SELF_MODIFICATION", "Cannot change your own account status.")
+    target.enabled = body.enabled
+    target.session_version += 1
+    audit(db, user, "User status updated")
+    db.commit()
+    return {"enabled": target.enabled}
+
+
+@app.get(PREFIX + "/admin/audit")
+def audits(user: User = Depends(admin_user), db: Session = Depends(get_db)):
+    return [
+        {"id": e.id, "action": e.action, "time": e.created_at.isoformat()}
+        for e in db.scalars(
+            select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(100)
+        ).all()
+    ]
+
+
+@app.get(PREFIX + "/admin/status")
+def system_status(
+    user: User = Depends(admin_user),
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    ready(db, cache)
+    return {
+        "database": "ready",
+        "redis": "ready",
+        "execution": "paper-only",
+        "mail_queue": cache.llen("gnk:mail"),
+    }

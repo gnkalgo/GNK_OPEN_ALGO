@@ -1,0 +1,214 @@
+import type { Order, Snapshot, Strategy, Ticket } from "./paper";
+const prefix = "/api/gnk/v1";
+class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+let state: Snapshot = {
+  session: null,
+  broker: "Disconnected",
+  balance: 0,
+  orders: [],
+  strategies: [],
+  activity: [],
+  scenario: "normal",
+  watchlist: [],
+};
+let csrf = "";
+const listeners = new Set<() => void>();
+const emit = (patch: Partial<Snapshot>) => {
+  state = { ...state, ...patch };
+  listeners.forEach((fn) => fn());
+};
+async function request<T>(
+  path: string,
+  method = "GET",
+  body?: unknown,
+  headers: Record<string, string> = {},
+): Promise<T> {
+  const abort = new AbortController(),
+    timeout = setTimeout(() => abort.abort(), 15000);
+  try {
+    const response = await fetch(prefix + path, {
+      method,
+      credentials: "same-origin",
+      cache: "no-store",
+      signal: abort.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(csrf ? { "X-CSRF-Token": csrf } : {}),
+        ...headers,
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      if (response.status === 401 && path !== "/auth/login")
+        emit({ session: null });
+      throw new ApiError(
+        data.detail?.message ?? "Request failed. Please retry.",
+        response.status,
+      );
+    }
+    return data as T;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+async function refresh() {
+  emit(await request<Snapshot>("/workspace"));
+}
+export const server = {
+  subscribe(fn: () => void) {
+    listeners.add(fn);
+    return () => {
+      listeners.delete(fn);
+    };
+  },
+  snapshot: () => state,
+  async initialize() {
+    try {
+      const data = await request<{ csrf: string }>("/session");
+      csrf = data.csrf;
+      await refresh();
+    } catch {
+      emit({ session: null });
+    }
+  },
+  async register(name: string, email: string, password?: string) {
+    await request("/auth/register", "POST", { name, email, password });
+  },
+  async verify(token?: string) {
+    await request("/auth/verify", "POST", { token });
+  },
+  async forgot(email: string) {
+    await request("/auth/forgot", "POST", { email });
+  },
+  async resend(email: string) {
+    await request("/auth/resend", "POST", { email });
+  },
+  async reset(token: string, password: string) {
+    await request("/auth/reset", "POST", { token, password });
+  },
+  async login(email: string, password: string) {
+    const data = await request<{ csrf: string }>("/auth/login", "POST", {
+      email,
+      password,
+    });
+    csrf = data.csrf;
+    await refresh();
+  },
+  async logout() {
+    await request("/auth/logout", "POST");
+    csrf = "";
+    emit({
+      session: null,
+      orders: [],
+      strategies: [],
+      activity: [],
+      watchlist: [],
+      balance: 0,
+      broker: "Disconnected",
+    });
+  },
+  explore() {
+    throw new Error("Public demo sessions are unavailable in server mode.");
+  },
+  async connect() {
+    await request("/brokers/paper/connect", "POST");
+    await refresh();
+  },
+  async submit(ticket: Ticket, key: string) {
+    if (state.orders.some((o) => o.status === "Unknown" && o.id !== key))
+      throw new Error(
+        "Reconcile the unknown order before placing another order.",
+      );
+    try {
+      const result = await request<Order>("/paper/orders", "POST", ticket, {
+        "Idempotency-Key": key,
+      });
+      await refresh();
+      return result;
+    } catch (e) {
+      // A lost response can hide a committed order. Preserve the original request key.
+      if (
+        e instanceof TypeError ||
+        (e instanceof DOMException && e.name === "AbortError") ||
+        (e instanceof ApiError && e.status >= 500)
+      ) {
+        const existing = state.orders.find((o) => o.id === key);
+        const unknown: Order = existing ?? {
+          ...ticket,
+          id: key,
+          status: "Unknown",
+          time: new Date().toISOString(),
+        };
+        emit({
+          orders: [unknown, ...state.orders.filter((o) => o.id !== key)],
+        });
+        return unknown;
+      }
+      throw e;
+    }
+  },
+  async reconcile(key: string) {
+    await request(`/paper/orders/${encodeURIComponent(key)}`);
+    await refresh();
+  },
+  async saveStrategy(s: Omit<Strategy, "id" | "status">, id?: string) {
+    const data = await request<{ id: string }>(
+      id ? `/strategies/${encodeURIComponent(id)}` : "/strategies",
+      id ? "PUT" : "POST",
+      s,
+    );
+    await refresh();
+    return data.id;
+  },
+  async transition(id: string, status: Strategy["status"]) {
+    await request(`/strategies/${encodeURIComponent(id)}/transition`, "POST", {
+      status,
+    });
+    await refresh();
+  },
+  async profile(name: string) {
+    await request("/profile", "PUT", { name });
+    await refresh();
+  },
+  async toggleWatch(symbol: string) {
+    await request(`/watchlist/${encodeURIComponent(symbol)}`, "PUT");
+    await refresh();
+  },
+  scenario() {
+    /* No client fixture controls in server mode. */
+  },
+  previewRole() {
+    /* Roles are issued exclusively by the server. */
+  },
+  resetForTests() {
+    /* No server data reset from browser code. */
+  },
+  adminUsers: () =>
+    request<
+      Array<{
+        id: string;
+        name: string;
+        email: string;
+        role: string;
+        enabled: boolean;
+      }>
+    >("/admin/users"),
+  adminStatus: () => request<Record<string, string | number>>("/admin/status"),
+  adminAudit: () =>
+    request<Array<{ id: string; action: string; time: string }>>(
+      "/admin/audit",
+    ),
+  async adminToggle(id: string, enabled: boolean) {
+    await request(`/admin/users/${encodeURIComponent(id)}`, "PATCH", {
+      enabled,
+    });
+  },
+};
