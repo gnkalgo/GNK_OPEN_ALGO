@@ -34,7 +34,7 @@ https://gnkalgo.com/api/gnk/v1/brokers/fyers/callback
 https://gnkalgo.com/api/gnk/v1/brokers/zerodha/callback
 ```
 
-The broker code in each callback path must match exactly: `dhan`, `fyers`, or `zerodha`. OpenAlgo's local `http://127.0.0.1:5000/<code>/callback` is not a GNK production callback URL. Configure the provider credentials only in the backend environment, never in Vite variables or frontend code:
+The broker code in each callback path must match exactly: `dhan`, `fyers`, or `zerodha`. Configure provider credentials only in the backend environment, never in Vite variables or frontend code:
 
 ```dotenv
 DHAN_PARTNER_ID=
@@ -50,15 +50,15 @@ Keep the production environment file private and restrict its filesystem permiss
 
 Broker callback paths have host-Nginx access logging disabled because providers return one-time authorization values in callback URLs. Keep that logging exception if changing the host Nginx configuration.
 
-Provider references: [OpenAlgo Dhan plugin](https://github.com/marketcalls/openalgo/tree/main/broker/dhan), [OpenAlgo FYERS plugin](https://github.com/marketcalls/openalgo/tree/main/broker/fyers), [OpenAlgo Zerodha plugin](https://github.com/marketcalls/openalgo/tree/main/broker/zerodha), [Dhan partner authentication](https://dhanhq.co/docs/v2/authentication/), [FYERS API v3](https://myapi.fyers.in/docsv3), and [Kite Connect login](https://kite.trade/docs/connect/v3/user/).
+Provider documentation: [Dhan partner authentication](https://dhanhq.co/docs/v2/authentication/), [FYERS API v3](https://myapi.fyers.in/docsv3), and [Kite Connect login](https://kite.trade/docs/connect/v3/user/).
 
 ### Live-trading control plane status
 
-The dashboard includes a fail-closed live-session control panel. Dhan authorization tokens are now encrypted at rest, but the live Dhan order path is not implemented: symbols are fixtures rather than verified Dhan instruments, and server-enforced risk limits and order reconciliation are missing. Live mode requests are persisted for audit, but confirmation suspends rather than activates the session; the GNK order endpoint remains paper-only. The Emergency Stop can be activated by its user and cleared only by an administrator. Clearing it does not resume a session.
+The dashboard includes a fail-closed live-session control panel. Dhan authorization tokens are now encrypted at rest, but the live Dhan order path is not implemented: symbols are fixtures rather than verified Dhan instruments, and live server-enforced risk limits and broker order reconciliation are missing. Paper account risk limits are implemented separately. Live mode requests are persisted for audit, but confirmation suspends rather than activates the session; the GNK order endpoint remains paper-only. The Emergency Stop can be activated by its user and cleared only by an administrator. Clearing it does not resume a session.
 
 Do not enable live order routes in this release. Production live trading requires verified Dhan instrument mapping, explicit server-side order and loss caps, per-user account validation, reliable idempotency and reconciliation for ambiguous broker responses, and an independent review of operational and regulatory requirements. No production live order can be placed by this release.
 
-The control-session expiry defaults to 900 seconds and can be set with `LIVE_SESSION_TTL_SECONDS` (60–86400). Alembic migration `0003` adds the session/event tables and user emergency-stop flag; Compose applies it before the API starts.
+The control-session expiry defaults to 900 seconds and can be set with `LIVE_SESSION_TTL_SECONDS` (60–86400). Alembic migrations add the session/event tables and user emergency-stop flag (`0003`), then encrypted Dhan access-token storage (`0004`); Compose applies all pending migrations before the API starts.
 
 ```bash
 # On the Ubuntu server, from the repository root:
@@ -179,3 +179,11 @@ The local default tests use SQLite and FakeRedis. To run real service tests, pro
 - Docker Engine was unavailable during local verification. Compose configuration parsing, Python tests and SQLite migrations passed; actual image builds, PostgreSQL row-lock integration, Redis 8 integration, SMTP provider delivery, certificates, DNS and production rollout remain unverified until executed in their target environments.
 
 Technology references used: [FastAPI](https://fastapi.tiangolo.com/) and [SQLAlchemy 2.0 PostgreSQL/Psycopg documentation](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html).
+
+## Redesign migration and release preflight
+
+Apply Alembic through revision `0005` before running the account control center. This adds `risk_policies`; it does not migrate or enable live execution. Default paper limits apply when an account has no saved row. Back up the target database before any production schema update; the local SQLite migration test is not target-environment cutover evidence.
+
+Run `python tools/dependency_inventory.py --check` to detect stale dependency inventory. Commercial release additionally requires `python tools/dependency_inventory.py --release` and the evidence in `docs/RELEASE-APPROVAL.json`. The current reviews are pending and this command intentionally fails. Existing service start/update commands do not enforce this preflight automatically. A passing health endpoint or paper test is not approval for a commercial live deployment.
+
+Paper account halts and live emergency stops are separate. The former blocks new paper orders; the latter preserves the existing live-control behavior while allowing paper simulation. Neither action cancels orders or flattens positions.

@@ -1,0 +1,38 @@
+{
+  "lockfile_sha256": {
+    "frontend/package-lock.json": "f72583fe9c63fc3b7cbe5773cdf2f6e64ee278a520ae223c74f64afeeb4035c0",
+    "backend/requirements.lock": "cfb4f064d43ca629e84daab59f2417eb7b95d2a69fe76b08f67dd76a3beebffa"
+  },
+  "reviews": {
+    "owner_license": {
+      "status": "pending",
+      "reviewer": "",
+      "evidence": ""
+    },
+    "source_provenance": {
+      "status": "pending",
+      "reviewer": "",
+      "evidence": ""
+    },
+    "dependency_licenses_and_notices": {
+      "status": "pending",
+      "reviewer": "",
+      "evidence": ""
+    },
+    "broker_and_market_data_terms": {
+      "status": "pending",
+      "reviewer": "",
+      "evidence": ""
+    },
+    "regulatory_scope": {
+      "status": "pending",
+      "reviewer": "",
+      "evidence": ""
+    },
+    "security_and_recovery": {
+      "status": "pending",
+      "reviewer": "",
+      "evidence": ""
+    }
+  }
+}

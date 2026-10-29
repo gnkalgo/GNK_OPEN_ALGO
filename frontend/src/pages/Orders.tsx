@@ -1,3 +1,4 @@
+import { ledger } from "../api/ledger";
 import { useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -298,20 +299,7 @@ export function Books({
       : view === "orders"
         ? orders.filter((o) => filter === "All" || o.status === filter)
         : filled;
-  const grouped = instruments
-    .map((i) => {
-      const os = filled.filter((o) => o.symbol === i.symbol);
-      const quantity = os.reduce(
-        (n, o) => n + o.quantity * (o.side === "BUY" ? 1 : -1),
-        0,
-      );
-      const netValue = os.reduce(
-        (n, o) => n + o.quantity * o.price * (o.side === "BUY" ? 1 : -1),
-        0,
-      );
-      return { ...i, quantity, netValue, pnl: quantity * i.price - netValue };
-    })
-    .filter((i) => i.quantity !== 0);
+  const grouped = ledger(orders, instruments).filter(item => item.quantity !== 0);
   const isPositions = view === "positions" || view === "portfolio";
   return (
     <>
@@ -397,7 +385,7 @@ export function Books({
                   </thead>
                   <tbody>
                     {grouped.map((p) => (
-                      <tr key={p.symbol}>
+                      <tr key={`${p.exchange}:${p.symbol}:${p.product}`}>
                         <td>
                           <b>{p.symbol}</b>
                           <small>{p.exchange} · Paper</small>
@@ -482,8 +470,8 @@ export function Books({
         )}
       </Panel>
       <div className="banner">
-        Paper ledger only. The dashboard’s illustrative sample positions are
-        separate from your session’s submitted orders.{" "}
+        Paper ledger only. Position cost uses weighted average entry prices.
+        Fees, settlement and margin are not modeled.{" "}
         {view === "orders" && <Link to="/app/trades">Review trade book →</Link>}
         {view === "trades" && (
           <Link to="/app/positions">Review positions →</Link>

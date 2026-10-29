@@ -63,6 +63,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.lock
       - run: pip install -r requirements.lock
+      - run: python ../tools/dependency_inventory.py --check
       - run: ruff check app tests migrations
       - run: alembic upgrade head
       - run: alembic check

@@ -54,6 +54,7 @@ const navigation = [
     title: "MANAGE",
     items: [
       ["Broker connections", "/app/brokers", Unplug],
+      ["Control center", "/app/controls", ShieldCheck],
       ["Settings", "/app/profile", Settings2],
     ],
   },

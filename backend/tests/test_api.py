@@ -522,6 +522,54 @@ def test_gnkalgo_namespace_uses_authenticated_paper_services(client):
     assert len(client.get(GNK_ALGO + "/orders").json()["orders"]) == 1
 
 
+def test_gnkalgo_namespace_exposes_auth_strategy_and_admin_services(client):
+    registration = client.post(
+        GNK_ALGO + "/auth/register",
+        json={
+            "name": "Paper Trader",
+            "email": "canonical@example.com",
+            "password": PASSWORD,
+        },
+    )
+    assert registration.status_code == 202
+    verified = client.post(GNK_ALGO + "/auth/verify", json={"token": token_for(client)})
+    assert verified.status_code == 200
+    logged_in = client.post(
+        GNK_ALGO + "/auth/login",
+        json={"email": "canonical@example.com", "password": PASSWORD},
+    )
+    assert logged_in.status_code == 200
+    client.headers["X-CSRF-Token"] = logged_in.json()["csrf"]
+    assert client.get(GNK_ALGO + "/session").status_code == 200
+    assert client.get(GNK_ALGO + "/workspace").status_code == 200
+
+    client.post(GNK_ALGO + "/brokers/paper/connect")
+    strategy = client.post(
+        GNK_ALGO + "/strategies",
+        json={
+            "name": "Canonical",
+            "symbol": "RELIANCE",
+            "quantity": 1,
+            "loss": 100,
+            "signal": "EMA crossover",
+        },
+    )
+    assert strategy.status_code == 200
+    strategy_id = strategy.json()["id"]
+    assert client.post(
+        GNK_ALGO + f"/strategies/{strategy_id}/transition",
+        json={"status": "Validated"},
+    ).status_code == 200
+    assert client.get(GNK_ALGO + "/admin/users").status_code == 403
+
+    with client.db() as db:
+        db.scalar(select(User)).role = "admin"
+        db.commit()
+    assert client.get(GNK_ALGO + "/admin/users").status_code == 200
+    assert client.get(GNK_ALGO + "/admin/audit").status_code == 200
+    assert client.get(GNK_ALGO + "/admin/status").status_code == 200
+
+
 def test_live_trading_control_plane_records_requests_but_never_activates(client):
     from app.models import BrokerConnection, LiveTradingSession, LiveTradingSessionEvent
 

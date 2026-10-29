@@ -1,3 +1,4 @@
+import { ledger } from "../api/ledger";
 import { useState } from "react";
 import {
   ArrowDownLeft,
@@ -36,8 +37,10 @@ export default function Dashboard() {
   } = usePaper();
   const [period, setPeriod] = useState("1D"),
     [refresh, setRefresh] = useState(false);
-  const filled = orders.filter((x) => x.status === "Filled"),
-    active = strategies.filter((s) => s.status === "Active").length;
+  const positions = ledger(orders, instruments);
+  const openPositions = positions.filter(position => position.quantity !== 0);
+  const pnl = positions.reduce((total, position) => total + position.realized + position.pnl, 0);
+  const active = strategies.filter((s) => s.status === "Active").length;
   const metrics = [
     {
       title: "Available balance",
@@ -47,29 +50,26 @@ export default function Dashboard() {
       extra: "Paper funds",
     },
     {
-      title: "Today’s P&L",
-      value: "+₹12,450.80",
-      sub: "+2.84% from previous session",
+      title: "Paper P&L",
+      value: money(pnl),
+      sub: "Realized and unrealized, before fees",
       icon: CircleDollarSign,
-      extra: "+2.84%",
-      positive: true,
+      extra: "Fictional marks",
+      positive: pnl >= 0,
     },
     {
       title: "Open positions",
-      value: String(4 + new Set(filled.map((o) => o.symbol)).size).padStart(
-        2,
-        "0",
-      ),
-      sub: "Across your paper portfolio",
+      value: String(openPositions.length).padStart(2, "0"),
+      sub: "From your submitted paper orders",
       icon: Layers,
-      extra: "3 profitable",
+      extra: "Paper ledger",
     },
     {
       title: "Active strategies",
       value: String(active).padStart(2, "0"),
       sub: `${strategies.length} total strategies in workspace`,
       icon: Zap,
-      extra: "Paper mode",
+      extra: "Configuration only",
     },
   ];
   return (
@@ -80,7 +80,7 @@ export default function Dashboard() {
         subtitle="Here’s how your trading day is shaping up."
       >
         <span className="date-label">
-          <CalendarDays size={14} /> 28 Oct 2026
+          <CalendarDays size={14} /> {new Intl.DateTimeFormat("en-IN", {day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Kolkata"}).format(new Date())}
         </span>
         <button
           className="button"
@@ -138,12 +138,12 @@ export default function Dashboard() {
       </div>
       <div className="dashboard-primary">
         <Panel
-          title="Portfolio performance"
-          extra={<Badge tone="green">Paper market open</Badge>}
+          title="Example performance curve"
+          extra={<Badge tone="green">Illustrative data</Badge>}
         >
           <div className="performance-top">
             <div>
-              <span className="muted">Total portfolio value</span>
+              <span className="muted">Illustrative portfolio value</span>
               <div className="portfolio-value">
                 ₹5,42,860<span className="decimal">.50</span>
                 <span className="positive performance-gain">
@@ -186,7 +186,7 @@ export default function Dashboard() {
               <i /> Portfolio value{" "}
               <span className="muted">· fictional {period} snapshot</span>
             </span>
-            <span className="muted">Last updated just now</span>
+            <span className="muted">Example dataset</span>
           </div>
         </Panel>
         <Panel
@@ -233,7 +233,7 @@ export default function Dashboard() {
           title="Open positions"
           extra={<TextLink to="/app/positions">View positions</TextLink>}
         >
-          {scenario === "empty" ? (
+          {scenario === "empty" || openPositions.length === 0 ? (
             <Empty />
           ) : (
             <div className="table-scroll">
@@ -245,30 +245,16 @@ export default function Dashboard() {
                     <th>AVG. PRICE</th>
                     <th>LTP</th>
                     <th>P&L</th>
-                    <th>CHANGE</th>
+                    <th>MODE</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {instruments.slice(0, 4).map((i, idx) => (
-                    <tr key={i.symbol}>
-                      <td>
-                        <Link to={`/app/markets?symbol=${i.symbol}`}>
-                          <b>{i.symbol}</b>
-                        </Link>
-                        <small>
-                          NSE <span className="product-tag">Delivery</span>
-                        </small>
-                      </td>
-                      <td>{[25, 10, 40, 20][idx]}</td>
-                      <td>{money(i.price - [50.3, -25, 21.5, 28][idx])}</td>
-                      <td>{money(i.price)}</td>
-                      <td className={i.change >= 0 ? "positive" : "negative"}>
-                        {i.change >= 0 ? "+" : "−"}
-                        {money([1257.5, 250, 860, 560][idx])}
-                      </td>
-                      <td>
-                        <Change value={i.change} />
-                      </td>
+                  {openPositions.map((position) => (
+                    <tr key={`${position.exchange}:${position.symbol}:${position.product}`}>
+                      <td><Link to={`/app/markets?symbol=${position.symbol}`}><b>{position.symbol}</b></Link><small>{position.exchange} · {position.product}</small></td>
+                      <td>{position.quantity}</td><td>{money(position.average)}</td><td>{money(position.price)}</td>
+                      <td className={position.pnl >= 0 ? "positive" : "negative"}>{money(position.pnl)}</td>
+                      <td><Badge tone="amber">Paper</Badge></td>
                     </tr>
                   ))}
                 </tbody>
@@ -276,8 +262,8 @@ export default function Dashboard() {
             </div>
           )}
           <div className="table-total">
-            <span>Sample positions · unrealized P&L</span>
-            <b className="positive">+₹2,427.50</b>
+            <span>Paper positions / unrealized P&L</span>
+            <b>{money(positions.reduce((total, position) => total + position.pnl, 0))}</b>
           </div>
         </Panel>
         <Panel
@@ -288,7 +274,7 @@ export default function Dashboard() {
             <div className="strategy-stat">
               <strong>{active}</strong>
               <span>
-                active strategies<small>Running in paper mode</small>
+                active configurations<small>No execution engine connected</small>
               </span>
               <Zap size={24} />
             </div>

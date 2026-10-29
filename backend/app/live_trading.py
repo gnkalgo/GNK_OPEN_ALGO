@@ -261,8 +261,8 @@ def create_live_session(
         "live_available": False,
         "live_orders_enabled": False,
         "blockers": [
-            "OPENALGO_PER_USER_ISOLATION_UNAVAILABLE",
-            "BROKER_AUTH_SESSION_NOT_RETAINED",
+            "DHAN_INSTRUMENT_MAPPING_UNAVAILABLE",
+            "LIVE_RISK_LIMITS_UNCONFIGURED",
         ],
     }
 
@@ -317,12 +317,12 @@ def confirm_live_session(
     session.suspension_reason = LIVE_UNAVAILABLE
     session.version += 1
     _event(db, session, user.id, "CONFIRMATION_BLOCKED", request_id, LIVE_UNAVAILABLE)
-    _audit(db, user.id, "Live-session activation blocked: OpenAlgo isolation unavailable")
+    _audit(db, user.id, "Live-session activation blocked: GNK live execution unavailable")
     db.commit()
     fail(
         409,
         "LIVE_TRADING_UNAVAILABLE",
-        "Confirmation was recorded, but live trading remains suspended because per-user OpenAlgo isolation and broker authentication are unavailable.",
+        "Confirmation was recorded, but live trading remains suspended because GNK live order execution is unavailable.",
     )
 
 
@@ -376,7 +376,7 @@ def resume_live_session(
     fail(
         409,
         "LIVE_TRADING_UNAVAILABLE",
-        "The session cannot resume until broker authentication and per-user OpenAlgo isolation are verified.",
+        "The session cannot resume until GNK live order execution is implemented and verified.",
     )
 
 

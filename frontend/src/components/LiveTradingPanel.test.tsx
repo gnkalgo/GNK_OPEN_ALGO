@@ -13,7 +13,7 @@ test("live trading stays unavailable and the paper mode is explicit", async () =
     screen.getByRole("button", { name: "Live Trading unavailable" }),
   ).toBeDisabled();
   expect(
-    screen.getByText(/per-user OpenAlgo provisioner/),
+    screen.getByText(/does not validate live trading permissions/),
   ).toBeInTheDocument();
   await waitFor(() => {
     expect(screen.getByText("Inactive")).toBeInTheDocument();

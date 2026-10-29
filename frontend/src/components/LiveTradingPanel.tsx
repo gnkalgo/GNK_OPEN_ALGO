@@ -83,17 +83,17 @@ export function LiveTradingPanel() {
         </div>
         <p className="live-mode-explanation">
           Paper execution remains enabled. Live order submission is disabled
-          until every GNK ALGO user has a verified, isolated OpenAlgo broker
-          session.
+          until verified broker execution, instrument mapping, order risk
+          controls and reconciliation are implemented.
         </p>
 
         <div className="live-safety-notice" role="note">
           <AlertTriangle size={18} />
           <span>
             <b>Account authentication is not trading authorization.</b> This
-            deployment does not retain broker authentication sessions and has
-            no per-user OpenAlgo provisioner. A linked account is not proof
-            that broker connectivity or trading permissions are valid.
+            deployment does not validate live trading permissions or expose
+            broker order submission. A linked account is not proof that
+            connectivity or trading permissions are valid.
           </span>
         </div>
 
@@ -274,8 +274,8 @@ export function LiveTradingPanel() {
             <p>{confirmationWarning}</p>
             <p>
               <b>Current deployment status:</b> the broker session cannot be
-              validated and per-user OpenAlgo isolation is not configured.
-              Confirming will not enable live orders.
+              used for trading because GNK ALGO's live execution service is
+              not implemented. Confirming will not enable live orders.
             </p>
             <div className="live-session-actions">
               <button

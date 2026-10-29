@@ -38,6 +38,9 @@ test("server session and CSRF remain in memory; mutations use same-origin cookie
   vi.stubGlobal("fetch", fetchMock);
   await server.initialize();
   await server.profile("Updated");
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/gnkalgo/session");
+  expect(fetchMock.mock.calls[1][0]).toBe("/api/v1/gnkalgo/workspace");
+  expect(fetchMock.mock.calls[2][0]).toBe("/api/v1/gnkalgo/profile");
   expect(fetchMock.mock.calls[2][1]).toMatchObject({
     credentials: "same-origin",
     method: "PUT",
@@ -47,10 +50,8 @@ test("server session and CSRF remain in memory; mutations use same-origin cookie
   expect(sessionStorage.length).toBe(0);
 });
 test("lost order response preserves the same request identifier as Unknown", async () => {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockRejectedValue(new TypeError("Network unavailable")),
-  );
+  const fetchMock = vi.fn().mockRejectedValue(new TypeError("Network unavailable"));
+  vi.stubGlobal("fetch", fetchMock);
   const order = await server.submit(
     {
       symbol: "TCS",
@@ -63,6 +64,7 @@ test("lost order response preserves the same request identifier as Unknown", asy
     },
     "fixture-request",
   );
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/gnkalgo/orders");
   expect(order.status).toBe("Unknown");
   expect(order.id).toBe("fixture-request");
   await expect(
@@ -100,7 +102,7 @@ test("live trading status uses the GNK v1 namespace and reports paper-only execu
       last_connection_check: null,
       broker_auth_valid: false,
       risk_limits: null,
-      blockers: ["OPENALGO_PER_USER_ISOLATION_UNAVAILABLE"],
+      blockers: ["BROKER_INSTRUMENT_MAPPING_UNAVAILABLE"],
       brokers: [],
       session: null,
     }),

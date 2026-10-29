@@ -44,6 +44,15 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class RiskPolicy(Base):
+    __tablename__ = "risk_policies"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    max_order_value: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("1000000"))
+    max_daily_value: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("5000000"))
+    max_quantity: Mapped[int] = mapped_column(default=1000)
+    halted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class BrokerConnection(Base):
     __tablename__ = "broker_connections"
     __table_args__ = (

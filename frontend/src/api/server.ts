@@ -1,5 +1,5 @@
 import type { Order, Snapshot, Strategy, Ticket } from "./paper";
-const prefix = "/api/gnk/v1";
+const prefix = "/api/v1/gnkalgo";
 class ApiError extends Error {
   constructor(
     message: string,
@@ -8,6 +8,30 @@ class ApiError extends Error {
     super(message);
   }
 }
+export type RiskPolicy = {
+  max_order_value: string;
+  max_daily_value: string;
+  max_quantity: number;
+  halted: boolean;
+  currency: "INR";
+  scope: "paper";
+  day_timezone: string;
+  daily_value_used: string;
+  emergency_stop: boolean;
+  live_orders_enabled: false;
+};
+export type PlatformStatus = {
+  execution: "paper-only";
+  live_orders_enabled: false;
+  capabilities: { name: string; status: string }[];
+  release_blockers: string[];
+};
+export const controls = {
+  policy: () => request<RiskPolicy>("/risk-policy"),
+  platform: () => request<PlatformStatus>("/platform"),
+  save: (policy: Pick<RiskPolicy, "max_order_value" | "max_daily_value" | "max_quantity" | "halted">) =>
+    request<RiskPolicy>("/risk-policy", "PUT", policy),
+};
 export type BrokerCode = "dhan" | "fyers" | "zerodha";
 export type BrokerProvider = {
   code: BrokerCode;
@@ -86,7 +110,7 @@ async function request<T>(
   const abort = new AbortController(),
     timeout = setTimeout(() => abort.abort(), 15000);
   try {
-    const url = path.startsWith("/api/v1/gnkalgo/")
+    const url = path.startsWith("/api/")
       ? path
       : prefix + path;
     const response = await fetch(url, {
@@ -200,46 +224,46 @@ export const server = {
     await request(`/brokers/${code}`, "DELETE");
   },
   liveTradingStatus: () =>
-    request<LiveTradingStatus>("/api/v1/gnkalgo/trading-mode"),
+    request<LiveTradingStatus>("/trading-mode"),
   setTradingMode: (mode: "PAPER" | "LIVE") =>
-    request<LiveTradingStatus>("/api/v1/gnkalgo/trading-mode", "PUT", { mode }),
+    request<LiveTradingStatus>("/trading-mode", "PUT", { mode }),
   createLiveSession: (broker_code: BrokerCode) =>
     request<{
       session: LiveTradingSession;
       live_available: false;
       live_orders_enabled: false;
       blockers: string[];
-    }>("/api/v1/gnkalgo/live-sessions", "POST", { broker_code }),
+    }>("/live-sessions", "POST", { broker_code }),
   confirmLiveSession: (id: string) =>
     request(
-      `/api/v1/gnkalgo/live-sessions/${encodeURIComponent(id)}/confirm`,
+      `/live-sessions/${encodeURIComponent(id)}/confirm`,
       "POST",
       { confirmed: true },
     ),
   suspendLiveSession: (id: string) =>
     request(
-      `/api/v1/gnkalgo/live-sessions/${encodeURIComponent(id)}/suspend`,
+      `/live-sessions/${encodeURIComponent(id)}/suspend`,
       "POST",
     ),
   resumeLiveSession: (id: string) =>
     request(
-      `/api/v1/gnkalgo/live-sessions/${encodeURIComponent(id)}/resume`,
+      `/live-sessions/${encodeURIComponent(id)}/resume`,
       "POST",
     ),
   endLiveSession: (id: string) =>
     request(
-      `/api/v1/gnkalgo/live-sessions/${encodeURIComponent(id)}/end`,
+      `/live-sessions/${encodeURIComponent(id)}/end`,
       "POST",
     ),
   activateEmergencyStop: () =>
-    request("/api/v1/gnkalgo/emergency-stop", "POST"),
+    request("/emergency-stop", "POST"),
   async submit(ticket: Ticket, key: string) {
     if (state.orders.some((o) => o.status === "Unknown" && o.id !== key))
       throw new Error(
         "Reconcile the unknown order before placing another order.",
       );
     try {
-      const result = await request<Order>("/paper/orders", "POST", ticket, {
+      const result = await request<Order>("/orders", "POST", ticket, {
         "Idempotency-Key": key,
       });
       await refresh();
@@ -267,7 +291,7 @@ export const server = {
     }
   },
   async reconcile(key: string) {
-    await request(`/paper/orders/${encodeURIComponent(key)}`);
+    await request(`/orders/${encodeURIComponent(key)}`);
     await refresh();
   },
   async saveStrategy(s: Omit<Strategy, "id" | "status">, id?: string) {

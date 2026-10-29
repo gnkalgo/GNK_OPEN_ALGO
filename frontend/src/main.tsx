@@ -11,6 +11,7 @@ import {
 import { Shell } from "./components/Shell";
 import Landing from "./pages/Landing";
 import Auth from "./pages/Auth";
+import ControlCenter from "./pages/ControlCenter";
 import Dashboard from "./pages/Dashboard";
 import Markets from "./pages/Markets";
 import Brokers from "./pages/Brokers";
@@ -85,6 +86,7 @@ function App() {
       <Route path="/app" element={<Shell />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
+        <Route path="controls" element={<ControlCenter />} />
         <Route path="markets" element={<Markets />} />
         <Route path="brokers" element={<Brokers />} />
         <Route path="brokers/callback" element={<Brokers callback />} />

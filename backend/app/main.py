@@ -30,6 +30,9 @@ from .models import (
     User,
     now,
 )
+from .portfolio import positions as paper_positions
+from .risk import rejection as risk_rejection
+from .risk import router as risk_router
 from .schemas import (
     BrokerConfirmation,
     Email,
@@ -65,6 +68,7 @@ app = FastAPI(
     redoc_url=None,
 )
 app.include_router(live_trading_router)
+app.include_router(risk_router)
 PREFIX = "/api/gnk/v1"
 GNK_ALGO_PREFIX = "/api/v1/gnkalgo"
 BROKER_OAUTH_TTL = 300
@@ -141,7 +145,7 @@ def order_view(o):
         **{k: v for k, v in o.ticket.items() if k != "request"},
         "id": o.request_key,
         "status": o.status,
-        "time": o.created_at.isoformat(),
+        "time": (o.created_at if o.created_at.tzinfo else o.created_at.replace(tzinfo=UTC)).isoformat(),
         "reason": o.reason,
     }
 
@@ -448,8 +452,10 @@ def gnkalgo_delete_order(
 
 @app.get(f"{GNK_ALGO_PREFIX}/portfolio/positions")
 def gnkalgo_positions(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    del db
-    return {"positions": [], "session": public_user(user)}
+    orders = db.scalars(select(PaperOrder).where(PaperOrder.user_id == user.id)
+                        .order_by(PaperOrder.created_at, PaperOrder.id)).all()
+    return {"positions": paper_positions(orders, QUOTES), "session": public_user(user),
+            "mode": "paper", "valuation": "fictional", "includes_closed": True}
 
 
 @app.get(f"{GNK_ALGO_PREFIX}/portfolio/holdings")
@@ -543,6 +549,64 @@ def gnkalgo_profile(body: Profile, user: User = Depends(current_user), db: Sessi
 @app.put(f"{GNK_ALGO_PREFIX}/watchlist/{{symbol}}")
 def gnkalgo_watchlist(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     return watchlist(symbol=symbol, user=user, db=db)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/strategies")
+def gnkalgo_create_strategy(
+    body: StrategyConfig,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    return save_strategy(body=body, user=user, db=db)
+
+
+@app.put(f"{GNK_ALGO_PREFIX}/strategies/{{strategy_id}}")
+def gnkalgo_update_strategy(
+    strategy_id: str,
+    body: StrategyConfig,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    return save_strategy(body=body, strategy_id=strategy_id, user=user, db=db)
+
+
+@app.post(f"{GNK_ALGO_PREFIX}/strategies/{{strategy_id}}/transition")
+def gnkalgo_transition_strategy(
+    strategy_id: str,
+    body: Transition,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    return transition(strategy_id=strategy_id, body=body, user=user, db=db)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/admin/users")
+def gnkalgo_users(user: User = Depends(admin_user), db: Session = Depends(get_db)):
+    return users(user=user, db=db)
+
+
+@app.patch(f"{GNK_ALGO_PREFIX}/admin/users/{{user_id}}")
+def gnkalgo_user_status(
+    user_id: str,
+    body: UserStatus,
+    user: User = Depends(admin_user),
+    db: Session = Depends(get_db),
+):
+    return user_status(user_id=user_id, body=body, user=user, db=db)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/admin/audit")
+def gnkalgo_audits(user: User = Depends(admin_user), db: Session = Depends(get_db)):
+    return audits(user=user, db=db)
+
+
+@app.get(f"{GNK_ALGO_PREFIX}/admin/status")
+def gnkalgo_system_status(
+    user: User = Depends(admin_user),
+    db: Session = Depends(get_db),
+    cache: Redis = Depends(get_redis),
+):
+    return system_status(user=user, db=db, cache=cache)
 
 
 @app.post(PREFIX + "/auth/register", dependencies=[Depends(same_origin)], status_code=202)
@@ -1071,14 +1135,17 @@ def submit(
         fail(422, "INVALID_INSTRUMENT", "Invalid listed instrument, exchange or price.")
     price = Decimal(QUOTES[body.symbol]) if body.type == "MARKET" else body.price
     value = price * body.quantity
-    rejected = body.side == "BUY" and value > user.balance
+    reason = risk_rejection(db, user, body.quantity, price)
+    if not reason and body.side == "BUY" and value > user.balance:
+        reason = "Insufficient paper balance"
+    rejected = reason is not None
     ticket = {**submitted, "price": float(price), "request": submitted}
     order = PaperOrder(
         user_id=user.id,
         request_key=key,
         ticket=ticket,
         status="Rejected" if rejected else "Filled",
-        reason="Insufficient paper balance" if rejected else None,
+        reason=reason,
     )
     db.add(order)
     if not rejected:

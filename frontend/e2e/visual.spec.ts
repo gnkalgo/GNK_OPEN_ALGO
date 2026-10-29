@@ -49,6 +49,7 @@ test("landing and dashboard visual artifacts; route layouts have no horizontal o
     fullPage: true,
   });
   for (const path of [
+    "controls",
     "markets",
     "orders/new",
     "orders",

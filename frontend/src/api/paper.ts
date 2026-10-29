@@ -271,8 +271,8 @@ const demo = {
       broker_auth_valid: false,
       risk_limits: null,
       blockers: [
-        "OPENALGO_PER_USER_ISOLATION_UNAVAILABLE",
-        "BROKER_AUTH_SESSION_NOT_RETAINED",
+        "DHAN_INSTRUMENT_MAPPING_UNAVAILABLE",
+        "LIVE_RISK_LIMITS_UNCONFIGURED",
         "LIVE_ORDER_EXECUTION_DISABLED",
       ],
       brokers: [],

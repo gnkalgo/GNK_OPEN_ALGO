@@ -3088,3 +3088,27 @@ em {
     scroll-behavior: auto !important;
   }
 }
+/* GNK account governance workspace */
+.control-hero { display:flex; gap:24px; align-items:center; padding:30px; margin-bottom:24px; border:1px solid var(--border); border-radius:12px; background:linear-gradient(120deg,var(--surface2),var(--surface)); }
+.control-hero h2 {font-size:26px; margin:8px 0 12px; letter-spacing:-.7px;}
+.control-hero p {color:var(--muted); max-width:660px; margin:0; line-height:1.7;}
+.control-hero > .badge {margin-left:auto; white-space:nowrap;}
+.control-emblem {color:var(--accent); padding:20px; border:1px solid var(--border); border-radius:18px;}
+.control-grid {display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:24px;}
+.control-form {padding:24px;}
+.control-form p,.control-form small,.control-note p,.control-next p {color:var(--muted);line-height:1.7;}
+.control-form fieldset {padding:0; margin:20px 0; border:0; display:grid;gap:18px;min-width:0;}
+.control-form label {display:grid;gap:8px;}
+.control-form input:not([type=checkbox]) {width:100%;padding:12px;background:var(--bg);color:var(--text);border-radius:6px;}
+.control-form .control-check {display:flex;align-items:center;gap:10px;}
+.control-form input[type=checkbox] {width:17px;height:17px;accent-color:var(--accent);}
+.capability-list {padding:8px 24px;}
+.capability-row {display:flex;justify-content:space-between;gap:14px;align-items:center;padding:18px 0;border-bottom:1px solid var(--border);}
+.capability-row:last-child {border:0;}
+.control-note {padding:24px;border-top:1px solid var(--border);}
+.control-next {display:flex;justify-content:space-between;align-items:center;gap:24px;padding:28px 0;}
+.control-next p {margin:10px 0 0;}
+@media(max-width:900px) {.control-grid{grid-template-columns:1fr}.control-hero{flex-wrap:wrap;padding:22px}.control-hero > .badge{margin-left:0}.control-emblem{display:none}.control-next{align-items:flex-start;flex-direction:column}.capability-row{flex-wrap:wrap}}
+/* Keep account actions reachable when navigation exceeds the window height. */
+.sidebar {overflow-y:auto;overscroll-behavior:contain;}
+.sidebar > * {flex-shrink:0;}

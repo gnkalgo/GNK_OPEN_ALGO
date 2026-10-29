@@ -74,3 +74,9 @@ Tables use tabular numerals, compact rows, persistent headers within each table 
 | Unauthorized | Protected-route redirect or admin access-denied screen |
 
 Real broker app credentials stay in backend environment configuration. Provider login secrets are never collected by GNK, access tokens are exchanged server-side and discarded after account identity verification, only a broker display name and masked account identifier are persisted, and no live trading control exists. No client-only route or role preview can substitute for server access checks.
+
+## GNK governance redesign (29 October 2026)
+
+`/app/controls` adds a responsive control center with execution status, per-user persisted paper limits, gross turnover, account halt and capability list. Mutations require a server session; demo controls remain disabled and explicitly labeled. Loading/error states with reload, server acknowledgement and administrator-stop explanation are exposed accessibly.
+
+The dashboard now derives account P&L and open-position count from submitted fills, labels the performance chart as an example, displays the India-calendar date and distinguishes active strategy configurations from a running engine. Position books use weighted average cost with realized P&L separated from remaining open cost. Supplied GNK artwork is preserved.

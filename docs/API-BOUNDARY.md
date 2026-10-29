@@ -2,7 +2,7 @@
 
 **Backend addition:** the independent FastAPI implementation now exists in `backend/app/main.py`, and `frontend/src/api/server.ts` connects the existing UI to it when `VITE_API_MODE=server`. The sections below originally documented the frontend-only simulator and proposals. The implemented contract is the following table; it supersedes proposed paths where they differ. See [deployment instructions](DEPLOYMENT.md).
 
-| Implemented route under `/api/gnk/v1` | Contract |
+| Implemented route under `/api/v1/gnkalgo` | Contract |
 | --- | --- |
 | `POST /auth/register` | Name/email/password; generic 202, Argon2id password hash, durable verification outbox |
 | `POST /auth/verify` | Single-use email token; expired/replayed links rejected |
@@ -15,17 +15,23 @@
 | `POST /brokers/paper/connect` | Connect the server's paper simulator only |
 | `GET /brokers` | List configured Dhan, FYERS and Zerodha account links (masked identifiers only) |
 | `POST /brokers/:code/authorization` | Start provider authorization with one-time state and an HttpOnly callback cookie |
-| `GET /brokers/:code/callback` | Validate provider callback, exchange authorization server-side and create a short-lived confirmation |
+| `GET /brokers/:code/callback` | Validate provider callback, exchange authorization server-side and create a short-lived confirmation; existing provider callback URLs under `/api/gnk/v1` remain compatible |
 | `POST /brokers/pending` | Read the authorized account identity before explicit user confirmation |
-| `POST /brokers/:code/confirm`; `DELETE /brokers/:code` | Link or unlink account metadata; no broker token is persisted |
-| `POST /paper/orders` | Ticket plus UUID `Idempotency-Key`; locked PostgreSQL balance update and durable deduplication |
-| `GET /paper/orders/:key` | Read committed result for that user's original request; 404 leaves unknown client outcomes unresolved |
+| `POST /brokers/:code/confirm`; `DELETE /brokers/:code` | Link or unlink account metadata; Dhan tokens are encrypted at rest |
+| `GET /market/quote`, `/market/depth`, `/market/history`, `/market/search` | Fictional fixtures only; not live market data |
+| `POST /orders` | Paper ticket plus UUID `Idempotency-Key`; locked PostgreSQL balance update and durable deduplication |
+| `GET /orders/:key` | Read committed paper result for that user's original request; 404 leaves unknown client outcomes unresolved |
+| `GET /orders` | List the current user's paper orders |
+| `PUT /orders/:key`; `DELETE /orders/:key` | Reject modification/cancellation because paper fills are immediate |
+| `GET /portfolio/positions`, `/portfolio/holdings`, `/portfolio/funds` | Weighted-average paper positions (including closed rows for realized P&L), empty unsettled holdings and fictional paper balance |
 | `PUT /profile` | Update validated name |
 | `PUT /watchlist/:symbol` | Toggle listed fictional symbol |
 | `POST /strategies`, `PUT /strategies/:id` | Validate/save current user's configuration as Draft |
-| `POST /strategies/:id/transition` | Validate lifecycle transition and paper-connection prerequisite |
+| `POST /strategies/:id/transition` | Validate lifecycle transition and paper-connection prerequisite; no strategy execution engine |
 | `GET /admin/users`, `PATCH /admin/users/:id` | Server admin permission; view users or suspend/restore and revoke sessions |
 | `GET /admin/audit`, `/admin/status` | Server admin permission; redacted events and service readiness |
+
+The frontend server adapter now uses only `/api/v1/gnkalgo/` for application endpoints. Existing `/api/gnk/v1/` endpoints remain as backwards-compatible aliases; the provider callback path is retained to avoid breaking broker app registrations.
 
 All public auth POSTs require the configured `Origin`; authenticated mutations also require `X-CSRF-Token`. The client sends cookies with `credentials: same-origin`. No session or broker token enters browser storage. Server errors return `detail: {code, message}` and validation errors omit submitted values. Server-mode demo-role/scenario controls are absent and cannot assign authority. Session and role checks are enforced in `backend/app/security.py` on every request.
 
@@ -33,7 +39,7 @@ The server adapter preserves an uncertain order response as Unknown with the ori
 
 ## Live trading control plane (live execution disabled)
 
-The following authenticated routes persist and audit user requests, but do **not** connect to OpenAlgo or submit live orders:
+The following authenticated routes persist and audit user requests, but do **not** submit live orders:
 
 | Method and route | Behavior |
 | --- | --- |
@@ -42,8 +48,8 @@ The following authenticated routes persist and audit user requests, but do **not
 | `POST /api/v1/gnkalgo/live-sessions` | Creates a configurable-TTL `PENDING_CONFIRMATION` request for an already linked Dhan, FYERS, or Zerodha account; default TTL is 15 minutes |
 | `GET /api/v1/gnkalgo/live-sessions/current` | Returns the current user's latest session and mode status; expiry is enforced server-side |
 | `GET /api/v1/gnkalgo/live-sessions/{id}` | Returns an owned session only |
-| `POST /api/v1/gnkalgo/live-sessions/{id}/confirm` | Requires `{ "confirmed": true }`; records confirmation and suspends the request because broker validation/per-user OpenAlgo isolation is unavailable |
-| `POST /api/v1/gnkalgo/live-sessions/{id}/suspend`, `/resume`, `/end` | Suspend/end owned sessions; resume is blocked until upstream isolation and broker authorization can be verified |
+| `POST /api/v1/gnkalgo/live-sessions/{id}/confirm` | Requires `{ "confirmed": true }`; records confirmation and suspends the request because live broker execution and risk controls are unavailable |
+| `POST /api/v1/gnkalgo/live-sessions/{id}/suspend`, `/resume`, `/end` | Suspend/end owned sessions; resume is blocked until broker execution and risk controls can be verified |
 | `GET /api/v1/gnkalgo/live-sessions/{id}/events` | Returns only that user's redacted session transition events |
 | `POST /api/v1/gnkalgo/emergency-stop` | Latches the user's stop and suspends any pending or active live session |
 | `DELETE /api/v1/gnkalgo/admin/users/{user_id}/emergency-stop` | Admin-only reset; clearing the stop does not resume or activate a session |
@@ -56,7 +62,7 @@ The remaining sections describe the retained isolated demo and historical propos
 
 ## Executable boundary in this delivery
 
-The application imports `paper` from `frontend/src/api/paper.ts`. It is an in-memory simulation, not an HTTP API and not a backend. React components consume typed `Session`, `Snapshot`, `Instrument`, `Ticket`, `Order` and `Strategy` values. No fetch, WebSocket, broker SDK or network execution endpoint exists in the application source. Dependencies and development tools may use network access during installation.
+The demo adapter in `frontend/src/api/paper.ts` is an in-memory simulation, not an HTTP API or backend. In server mode, `frontend/src/api/server.ts` uses same-origin `fetch` calls only to the GNK ALGO API namespace. The frontend contains no broker SDK or direct broker order endpoint. React components consume typed `Session`, `Snapshot`, `Instrument`, `Ticket`, `Order` and `Strategy` values.
 
 | Method | Input | Result / effect |
 | --- | --- | --- |
@@ -80,7 +86,7 @@ The request key is generated before review and reused after an error. The adapte
 
 ## Proposed future integration contract — not implemented
 
-These are independent GNK contract proposals requiring backend agreement. They are **not existing endpoints** and are not derived from OpenAlgo paths.
+These are independent GNK contract proposals requiring backend agreement. They are **not existing endpoints**.
 
 | Proposed resource | Responsibility |
 | --- | --- |
@@ -101,3 +107,12 @@ Production transport should use same-origin `credentials: include`, HttpOnly/Sec
 An order submission timeout in a real service **does not prove no action occurred**. Mark it Unknown and query the original request's status. The simulator's `timeout` fixture explicitly fails before mutation; its `order-unknown` fixture models the uncertain-outcome branch separately. Preserve this distinction in a real adapter.
 
 This frontend has no production adapter switch. Integrating any real service requires replacing the boundary deliberately, implementing and testing the server contracts, and removing public demo-role/scenario controls from the production surface. Do not deploy this demo as a secure trading product.
+
+## Account governance and portfolio additions (29 October 2026)
+
+- `GET /api/v1/gnkalgo/platform`: authenticated capability manifest, development stage and live release blockers.
+- `GET /api/v1/gnkalgo/risk-policy`: current user paper limits and India-day gross turnover.
+- `PUT /api/v1/gnkalgo/risk-policy`: CSRF-protected update of decimal-string order/daily limits, integer quantity cap and boolean halt; no owner or execution-mode fields accepted.
+- `GET /api/v1/gnkalgo/portfolio/positions`: caller-scoped derived rows by symbol/exchange/product, weighted average cost, realized/unrealized paper P&L and fictional valuation marker. Includes closed rows; not settled broker holdings.
+
+Both GNK paper order route families enforce the same account risk policy under an account row lock. Rejected orders retain their request UUID and never affect cash or turnover. See [platform design](PLATFORM-DESIGN.md) for ceilings, day boundaries and outstanding live requirements.

@@ -2,6 +2,19 @@
 
 **Intelligence Behind Every Trade.** An independent React/TypeScript/Vite/Tailwind frontend and FastAPI backend, with PostgreSQL 17, SQLAlchemy 2.0/Psycopg 3, Alembic, Redis 8, Docker Compose, Nginx and GitHub Actions.
 
+## Independent platform redesign
+
+The business target is a **multi-user commercial platform with live broker execution**. This checkout is a development foundation with authenticated paper execution. Commercial tenancy, billing, a running strategy engine, licensed live data and live broker execution remain outstanding; account linking cannot enable trading.
+
+- [Product requirements, architecture decisions and staged delivery roadmap](docs/PLATFORM-DESIGN.md)
+- [Source provenance, third-party licensing and regulatory release review](docs/THIRD-PARTY-POLICY.md)
+- [Locked dependency declarations](docs/DEPENDENCY-INVENTORY.json) and [pending release approvals](docs/RELEASE-APPROVAL.json)
+- [Security boundary](SECURITY.md) and [contribution requirements](CONTRIBUTING.md)
+
+The new **Control center** at `/app/controls` shows capability availability and manages per-user server paper risk limits: quantity, order value, daily gross turnover and new-order halt. An administrator emergency stop cannot be cleared by a trader. Paper positions and account P&L derive from submitted fills using weighted average cost; the performance chart is a separately labeled fictional example. No OpenAlgo implementation was imported in this redesign; retained source and branding still require ownership/provenance review before release.
+
+Existing installations must run `alembic upgrade head` through revision `0005` before starting this version. Risk limits are paper controls and do not satisfy live broker margin or exchange validation.
+
 ## Server-backed deployment
 
 Production origin: **https://www.gnkalgo.com**. Follow [deployment setup](docs/DEPLOYMENT.md) for environment variables, SMTP, TLS, migrations, administrator bootstrap and container commands. 
@@ -35,12 +48,12 @@ No environment variables are required for the demo. Set VITE_API_MODE=server to 
 
 ## Scope and safety
 
-- The original frontend demo is still isolated. The independent GNK backend implements authentication, authorization and persisted paper workflows plus an audited, fail-closed live-session control plane. No OpenAlgo backend, real broker connection, live feed or external order execution is included.
+- The frontend demo is isolated. The GNK backend implements authentication, authorization and persisted paper workflows plus an audited, fail-closed live-session control plane. Broker account linking is not order execution; no live feed or external order execution is included.
 - Demo mode uses the typed in-memory adapter; refresh/logout clears its session and ledger. Server mode dispatches to frontend/src/api/server.ts and uses HttpOnly server cookies plus PostgreSQL persistence. Neither mode writes tokens to localStorage/sessionStorage.
 - Demo passwords are public fixture inputs, compared transiently and never stored. This simulator is **not an authentication or authorization system**. Route guards only preview navigation. In server mode, the GNK API enforces sessions, CSRF, roles, account ownership and paper-order validation.
-- All balances, prices, returns, positions, charts and activity are fictional. The dashboard includes clearly illustrative sample positions and performance. Books/portfolio show only actual orders submitted within the current demo session; sample positions are not imported into that ledger.
+- All balances, prices, returns, positions, charts and activity are fictional. Dashboard account metrics, books and positions derive from submitted paper orders. The performance chart remains a separate fictional example.
 - The paper ledger supports filled, rejected and unknown outcomes. Request identifiers prevent duplicate submissions. Unknown orders do not change balance until reconciled and block new orders. Reconciliation resolves the same request rather than resubmitting it.
-- All orders are paper-only and reviewed explicitly. The dashboard can record a live-session request, but cannot activate it: this deployment does not retain broker authentication or provision isolated OpenAlgo sessions per GNK user. Live mode must remain unavailable until per-user isolation, broker identity validation, risk checks, and reconciliation are verified.
+- All orders are paper-only and reviewed explicitly. The dashboard can record a live-session request, but cannot activate it. Live mode must remain unavailable until broker identity and instrument validation, server-side risk checks, order reconciliation, and execution are implemented and verified.
 - Fixture fills ignore fees, slippage, tick sizes, partial fills, liquidity, margin and exchange settlement. Sell orders can create a negative net position. Limit orders fill immediately at their entered price. Do not use these calculations for trading decisions.
 - Strategy validation and paper testing exercise configuration and UI transitions only. There is no running engine, historical backtest or profitability claim.
 
