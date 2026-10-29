@@ -26,7 +26,7 @@ The Compose stack exposes the web container only on `127.0.0.1:8080`; database, 
 
 ### Optional broker account linking
 
-The authenticated Brokers page supports account identity linking for Dhan, FYERS and Zerodha only. It does not submit live orders or retain broker access tokens. Apply for the relevant broker developer/partner credentials and register these exact callback URLs in each provider application:
+The authenticated Brokers page supports account identity linking for Dhan, FYERS and Zerodha. It does not submit live orders. Dhan access tokens are encrypted at rest; FYERS and Zerodha access tokens are discarded. Apply for the relevant broker developer/partner credentials and register these exact callback URLs in each provider application:
 
 ```text
 https://gnkalgo.com/api/gnk/v1/brokers/dhan/callback
@@ -39,13 +39,14 @@ The broker code in each callback path must match exactly: `dhan`, `fyers`, or `z
 ```dotenv
 DHAN_PARTNER_ID=
 DHAN_PARTNER_SECRET=
+DHAN_TOKEN_ENCRYPTION_KEY=
 FYERS_CLIENT_ID=
 FYERS_APP_SECRET=
 ZERODHA_API_KEY=
 ZERODHA_API_SECRET=
 ```
 
-Keep the production environment file private and restrict its filesystem permissions (for example, `chmod 600 .env`). Dhan account linking requires Dhan's approved partner consent flow; ordinary individual Dhan access tokens are not accepted. The OAuth callback exchanges credentials server-side, displays the broker account name and masked final four characters for explicit confirmation, then discards access tokens. Only that minimal identity is stored. The feature does not refresh or revoke broker sessions and does not provide trading access. Follow each broker's current developer terms and seek qualified advice about applicable SEBI/exchange obligations before offering any trading service.
+Keep the production environment file private and restrict its filesystem permissions (for example, `chmod 600 .env`). Generate `DHAN_TOKEN_ENCRYPTION_KEY` with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`, keep it private, and back it up securely; losing it makes stored Dhan sessions unreadable. Dhan account linking requires Dhan's approved partner consent flow; ordinary individual Dhan access tokens are not accepted. The OAuth callback exchanges credentials server-side, displays the broker account name and masked final four characters for explicit confirmation, and stores the access token encrypted with its provider expiry. The token is not refreshed and does not provide trading access. Dhan linking is unavailable unless the encryption key and partner credentials are configured. Follow each broker's current developer terms and seek qualified advice about applicable SEBI/exchange obligations before offering any trading service.
 
 Broker callback paths have host-Nginx access logging disabled because providers return one-time authorization values in callback URLs. Keep that logging exception if changing the host Nginx configuration.
 
@@ -53,9 +54,9 @@ Provider references: [OpenAlgo Dhan plugin](https://github.com/marketcalls/opena
 
 ### Live-trading control plane status
 
-The dashboard includes a fail-closed live-session control panel, but this deployment has **no OpenAlgo service or per-user OpenAlgo provisioner**. GNK's account-linking workflow discards broker tokens, and a shared OpenAlgo active session is not verified to isolate independent GNK users. Live mode requests are persisted for audit, but confirmation suspends rather than activates the session; the GNK order endpoint remains paper-only. The Emergency Stop can be activated by its user and cleared only by an administrator. Clearing it does not resume a session.
+The dashboard includes a fail-closed live-session control panel. Dhan authorization tokens are now encrypted at rest, but the live Dhan order path is not implemented: symbols are fixtures rather than verified Dhan instruments, and server-enforced risk limits and order reconciliation are missing. Live mode requests are persisted for audit, but confirmation suspends rather than activates the session; the GNK order endpoint remains paper-only. The Emergency Stop can be activated by its user and cleared only by an administrator. Clearing it does not resume a session.
 
-Do not add a shared OpenAlgo API key to the application or enable live order routes. Production live trading requires a reviewed isolation design that maps each GNK user to an upstream broker session, validates account identity and authorization server-side, and proves that upstream order/account requests cannot cross user boundaries. No production live order can be placed by this release.
+Do not enable live order routes in this release. Production live trading requires verified Dhan instrument mapping, explicit server-side order and loss caps, per-user account validation, reliable idempotency and reconciliation for ambiguous broker responses, and an independent review of operational and regulatory requirements. No production live order can be placed by this release.
 
 The control-session expiry defaults to 900 seconds and can be set with `LIVE_SESSION_TTL_SECONDS` (60–86400). Alembic migration `0003` adds the session/event tables and user emergency-stop flag; Compose applies it before the API starts.
 

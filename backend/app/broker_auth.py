@@ -1,6 +1,8 @@
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -27,11 +29,17 @@ class BrokerNotConfigured(BrokerAuthError):
 class BrokerProfile:
     account_id_last4: str
     account_name: str
+    access_token: str | None = field(default=None, repr=False)
+    access_token_expires_at: datetime | None = None
 
 
 def is_configured(code: str, config: Settings) -> bool:
     required = {
-        "dhan": (config.dhan_partner_id, config.dhan_partner_secret),
+        "dhan": (
+            config.dhan_partner_id,
+            config.dhan_partner_secret,
+            config.dhan_token_encryption_key,
+        ),
         "fyers": (config.fyers_client_id, config.fyers_app_secret),
         "zerodha": (config.zerodha_api_key, config.zerodha_api_secret),
     }
@@ -141,7 +149,25 @@ def complete_authorization(
                 "partner_secret": config.dhan_partner_secret,
             },
         )
-        return _profile(code, payload.get("dhanClientId"), payload.get("dhanClientName"))
+        access_token = payload.get("accessToken")
+        expiry_time = payload.get("expiryTime")
+        if not isinstance(access_token, str) or not access_token or len(access_token) > 4096:
+            raise BrokerAuthError("Dhan did not issue an account access token.")
+        if not isinstance(expiry_time, str):
+            raise BrokerAuthError("Dhan returned an invalid access-token expiry.")
+        try:
+            expires_at = datetime.fromisoformat(expiry_time)
+        except ValueError as exc:
+            raise BrokerAuthError("Dhan returned an invalid access-token expiry.") from exc
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+        profile = _profile(code, payload.get("dhanClientId"), payload.get("dhanClientName"))
+        return BrokerProfile(
+            account_id_last4=profile.account_id_last4,
+            account_name=profile.account_name,
+            access_token=access_token,
+            access_token_expires_at=expires_at.astimezone(UTC),
+        )
 
     if code == "fyers":
         auth_code = callback_params.get("auth_code", "")

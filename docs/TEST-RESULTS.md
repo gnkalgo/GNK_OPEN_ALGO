@@ -7,7 +7,7 @@ Date: 29 October 2026. Environment: Windows, Node.js 24.22.1, npm 11.19.1.
 - Responsive Chromium visual/route checks: 6 passed across desktop and mobile, including horizontal-overflow checks.
 - Production TypeScript/Vite build passed.
 - Ruff passed for all changed backend code and tests.
-- Alembic upgrades through revision `0003` verified against a disposable SQLite database, including the live-session, event, and emergency-stop schema.
+- Alembic upgrades through revision `0004` verified against a disposable SQLite database, including encrypted Dhan access-token columns.
 - The legacy broader desktop/mobile Chromium E2E regression remains 38 passed; this change ran the focused six-test visual suite rather than rerunning that full suite.
 - Final desktop/mobile Chromium E2E regression after server adapter integration: 38 passed (1.3 minutes).
 - Server-mode Chromium transport tests: 2 passed using isolated API fixtures (not a deployed PostgreSQL/SMTP stack).

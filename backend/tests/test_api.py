@@ -1,6 +1,6 @@
 import json
 import secrets
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -112,6 +112,7 @@ def test_broker_account_link_is_confirmed_and_never_persists_tokens(client, monk
         session_ttl=28800,
         dhan_partner_id="dhan-id",
         dhan_partner_secret="dhan-secret",
+        dhan_token_encryption_key="MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=",
         fyers_client_id="fyers-id",
         fyers_app_secret="fyers-secret",
         zerodha_api_key="zerodha-key",
@@ -170,11 +171,87 @@ def test_broker_account_link_is_confirmed_and_never_persists_tokens(client, monk
 
     columns = BrokerConnection.__table__.columns.keys()
     assert "access_token" not in columns and "api_secret" not in columns
+    assert "access_token_encrypted" in columns
     linked = client.get(P + "/brokers").json()
     zerodha = next(item for item in linked["providers"] if item["code"] == "zerodha")
     assert zerodha["connection"]["account_name"] == "Paper Test Account"
     assert linked["live_orders_enabled"] is False
     assert client.delete(P + "/brokers/zerodha").status_code == 200
+
+
+def test_dhan_link_stores_only_encrypted_access_token(client, monkeypatch):
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs, urlsplit
+
+    import app.main
+    from app import broker_auth
+    from app.models import BrokerConnection
+    from app.security import digest
+    from app.token_vault import decrypt_access_token
+
+    key = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI="
+    config = SimpleNamespace(
+        frontend_url="http://testserver",
+        cookie_secure=False,
+        session_ttl=28800,
+        dhan_partner_id="dhan-id",
+        dhan_partner_secret="dhan-secret",
+        dhan_token_encryption_key=key,
+        fyers_client_id="",
+        fyers_app_secret="",
+        zerodha_api_key="",
+        zerodha_api_secret="",
+    )
+    token = "secret-dhan-access-token"
+    expires_at = datetime(2026, 10, 30, 10, tzinfo=UTC)
+    monkeypatch.setattr(app.main, "settings", lambda: config)
+    monkeypatch.setattr(
+        broker_auth,
+        "start_authorization",
+        lambda code, state, settings: ("https://dhan.example/consent", {}),
+    )
+    monkeypatch.setattr(
+        broker_auth,
+        "complete_authorization",
+        lambda code, params, settings: broker_auth.BrokerProfile(
+            "1234", "Dhan Test Account", token, expires_at
+        ),
+    )
+    login(client)
+
+    assert client.post(P + "/brokers/dhan/authorization").status_code == 200
+    state = client.cookies.get("gnk_broker_state_dhan")
+    callback = client.get(
+        P + "/brokers/dhan/callback",
+        params={"status": "success", "tokenId": "one-time-token"},
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    pending_token = parse_qs(urlsplit(callback.headers["location"]).fragment)["pending"][0]
+    pending_key = "broker-pending:" + digest(pending_token)
+    pending_data = json.loads(client.cache.get(pending_key))
+    assert pending_data["access_token_encrypted"] != token
+    assert token not in client.cache.get(pending_key)
+    assert pending_data["access_token_expires_at"] == expires_at.isoformat()
+    assert client.post(P + "/brokers/pending", json={"token": pending_token}).json()[
+        "account_mask"
+    ] == "•••• 1234"
+
+    confirmed = client.post(P + "/brokers/dhan/confirm", json={"token": pending_token})
+    assert confirmed.status_code == 200
+    with client.db() as db:
+        connection = db.query(BrokerConnection).one()
+        assert connection.access_token_encrypted != token
+        assert decrypt_access_token(connection.access_token_encrypted, config) == token
+        assert connection.access_token_expires_at is not None
+        assert connection.access_token_expires_at.replace(tzinfo=UTC) == expires_at
+    public = client.get(P + "/brokers").json()
+    assert token not in json.dumps(public)
+    assert public["live_orders_enabled"] is False
+    assert client.delete(P + "/brokers/dhan").status_code == 200
+    with client.db() as db:
+        assert db.query(BrokerConnection).count() == 0
+    assert state
 
 
 def test_broker_authorization_rejects_unconfigured_provider(client, monkeypatch):
@@ -188,6 +265,7 @@ def test_broker_authorization_rejects_unconfigured_provider(client, monkeypatch)
         session_ttl=28800,
         dhan_partner_id="",
         dhan_partner_secret="",
+        dhan_token_encryption_key="",
         fyers_client_id="",
         fyers_app_secret="",
         zerodha_api_key="",

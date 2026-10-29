@@ -20,7 +20,7 @@ from .schemas import LiveSessionConfirmation, LiveSessionRequest, TradingModeReq
 from .security import admin_user, current_user, fail, get_redis, rate_limit
 
 router = APIRouter(prefix="/api/v1/gnkalgo", tags=["live trading control"])
-LIVE_UNAVAILABLE = "OPENALGO_PER_USER_ISOLATION_UNAVAILABLE"
+LIVE_UNAVAILABLE = "DIRECT_DHAN_EXECUTION_NOT_IMPLEMENTED"
 
 
 def _iso(value):
@@ -145,8 +145,8 @@ def _control_status(db: Session, user: User, request_id: str):
         "broker_auth_valid": False,
         "risk_limits": None,
         "blockers": [
-            "OPENALGO_PER_USER_ISOLATION_UNAVAILABLE",
-            "BROKER_AUTH_SESSION_NOT_RETAINED",
+            "DHAN_INSTRUMENT_MAPPING_UNAVAILABLE",
+            "LIVE_RISK_LIMITS_UNCONFIGURED",
             "LIVE_ORDER_EXECUTION_DISABLED",
         ],
         "brokers": [
@@ -205,7 +205,7 @@ def set_trading_mode(
         fail(
             409,
             "LIVE_TRADING_UNAVAILABLE",
-            "Live trading is disabled until isolated OpenAlgo sessions and broker authentication are configured.",
+            "Live trading is disabled until Dhan instrument mapping, risk limits and order execution are implemented.",
         )
     _audit(db, user.id, "Trading mode set to paper")
     db.commit()

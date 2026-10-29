@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from cryptography.fernet import Fernet
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,6 +22,7 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     dhan_partner_id: str = ""
     dhan_partner_secret: str = ""
+    dhan_token_encryption_key: str = ""
     fyers_client_id: str = ""
     fyers_app_secret: str = ""
     zerodha_api_key: str = ""
@@ -42,6 +44,16 @@ class Settings(BaseSettings):
         ):
             raise ValueError("FRONTEND_URL must be an HTTP(S) origin, without markdown or a path")
         return value.rstrip("/")
+
+    @field_validator("dhan_token_encryption_key")
+    @classmethod
+    def valid_dhan_token_encryption_key(cls, value: str):
+        if value:
+            try:
+                Fernet(value.encode("ascii"))
+            except (ValueError, UnicodeEncodeError) as exc:
+                raise ValueError("DHAN_TOKEN_ENCRYPTION_KEY must be a valid Fernet key") from exc
+        return value
 
 
 @lru_cache

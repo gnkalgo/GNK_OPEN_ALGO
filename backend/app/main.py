@@ -1,6 +1,6 @@
 import json
 import secrets
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import parse_qs
 from uuid import UUID, uuid4
@@ -56,6 +56,7 @@ from .security import (
     same_origin,
     verify_password,
 )
+from .token_vault import TokenVaultError, encrypt_access_token
 
 app = FastAPI(
     title="GNK ALGO API",
@@ -850,7 +851,12 @@ def broker_callback(
         return redirect_result(error=True)
     try:
         profile = broker_auth.complete_authorization(code, params, settings())
-    except broker_auth.BrokerAuthError:
+        if code == "dhan" and not profile.access_token:
+            raise TokenVaultError("Dhan did not provide an access token.")
+        encrypted_access_token = (
+            encrypt_access_token(profile.access_token, settings()) if code == "dhan" else None
+        )
+    except (broker_auth.BrokerAuthError, TokenVaultError):
         return redirect_result(error=True)
 
     pending_token = secrets.token_urlsafe(32)
@@ -863,6 +869,12 @@ def broker_callback(
                 "code": code,
                 "account_id_last4": profile.account_id_last4,
                 "account_name": profile.account_name,
+                "access_token_encrypted": encrypted_access_token,
+                "access_token_expires_at": (
+                    profile.access_token_expires_at.isoformat()
+                    if encrypted_access_token and profile.access_token_expires_at
+                    else None
+                ),
             }
         ),
     )
@@ -920,6 +932,11 @@ def broker_confirm(
     if connection:
         connection.account_id_last4 = data["account_id_last4"]
         connection.account_name = data["account_name"]
+        connection.access_token_encrypted = data.get("access_token_encrypted")
+        expiry = data.get("access_token_expires_at")
+        connection.access_token_expires_at = (
+            datetime.fromisoformat(expiry) if expiry else None
+        )
         connection.connected_at = now()
     else:
         db.add(
@@ -928,6 +945,12 @@ def broker_confirm(
                 broker_code=code,
                 account_id_last4=data["account_id_last4"],
                 account_name=data["account_name"],
+                access_token_encrypted=data.get("access_token_encrypted"),
+                access_token_expires_at=(
+                    datetime.fromisoformat(data["access_token_expires_at"])
+                    if data.get("access_token_expires_at")
+                    else None
+                ),
             )
         )
     live_sessions = db.scalars(
