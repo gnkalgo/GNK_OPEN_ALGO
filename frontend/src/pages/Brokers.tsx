@@ -5,6 +5,7 @@ import { paper, serverMode } from "../api/paper";
 import { server, type BrokerCode, type BrokerProvider } from "../api/server";
 import { useAction, usePaper } from "../hooks";
 import { Badge, Feedback, PageHead, Panel } from "../components/ui";
+import { LiveTradingPanel } from "../components/LiveTradingPanel";
 export default function Brokers({ callback = false }: { callback?: boolean }) {
   const { broker } = usePaper(),
     a = useAction(),
@@ -82,7 +83,7 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
       setPendingAccount(null);
       await reloadProviders();
       navigate("/app/brokers", { replace: true });
-    }, "Broker account linked. GNK does not retain broker access tokens.");
+    }, "Broker account linked. Review trading mode to activate an eligible Dhan live session.");
   }
 
   async function disconnectBroker(code: BrokerCode) {
@@ -101,14 +102,14 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
         }
         subtitle={
           serverMode
-            ? "Link your broker account securely. Broker linking does not enable live orders."
+            ? "Link your broker account securely, then review and confirm an eligible Dhan live session."
             : "Connect the paper simulator to explore the complete trading workflow."
         }
       />
       <div className="banner">
         <ShieldCheck size={18} />
         {serverMode
-          ? "Broker sign-in is handled by each broker. GNK stores only the account name and a masked ID; access tokens are discarded. Live trading is not enabled."
+          ? "Broker sign-in is handled by each broker. Dhan account identity and access tokens are encrypted on the server; only a masked ID is displayed. FYERS and Zerodha tokens are discarded after account linking. Dhan live trading requires server readiness checks and your explicit session confirmation."
           : "Frontend demo only. No real broker credentials, redirects, or access tokens are used."}
       </div>
       {serverMode && callback && pendingAccount && (
@@ -121,8 +122,9 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
               ({pendingAccount.account_mask}) to your GNK profile.
             </p>
             <p>
-              This only records the account link. GNK does not keep the broker
-              access token or submit live orders.
+              {pendingAccount.code === "dhan"
+                ? "GNK retains your Dhan account identity and access token encrypted on the server for the live pilot. Linking does not place orders; review and confirm a live session separately."
+                : "This records the account link only. The broker access token is discarded and live execution is unavailable for this broker."}
             </p>
             <Feedback {...a} />
             <button
@@ -139,7 +141,7 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
         </Panel>
       )}
       {serverMode && (
-        <Panel title="Broker accounts" extra={<Badge>Account link only</Badge>}>
+        <Panel title="Broker accounts" extra={<Badge>Dhan live pilot</Badge>}>
           <div className="broker-provider-grid">
             {providers.map((provider) => (
               <article className="broker-provider" key={provider.code}>
@@ -207,6 +209,7 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
           </p>
         </Panel>
       )}
+      {serverMode && !callback && <LiveTradingPanel />}
       <div className="two-column">
         <Panel
           title="GNK Paper Broker"
@@ -289,21 +292,26 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
               <span>01</span>
               <h3>Authorize your connection</h3>
               <p>
-                Use the simulated consent flow. Never enter broker secrets here.
+                {serverMode
+                  ? "Connect Dhan above and sign in on the broker's authorization page."
+                  : "Use the simulated consent flow. Never enter broker secrets here."}
               </p>
             </div>
             <div>
               <span>02</span>
               <h3>Confirm connection status</h3>
               <p>
-                The status changes to Connected after a successful callback
-                simulation.
+                {serverMode
+                  ? "Confirm the returned account identity to complete linking."
+                  : "The status changes to Connected after a successful callback simulation."}
               </p>
             </div>
             <div>
               <span>03</span>
-              <h3>Start with a paper order</h3>
-              <p>Review instrument, size, and direction before confirming.</p>
+              <h3>{serverMode ? "Review trading mode" : "Start with a paper order"}</h3>
+              <p>{serverMode
+                ? "Resolve the listed live blockers, request a Dhan session and explicitly confirm activation. The live desk supports NSE equity delivery BUY LIMIT orders."
+                : "Review instrument, size, and direction before confirming."}</p>
             </div>
           </div>
           {callback && (
