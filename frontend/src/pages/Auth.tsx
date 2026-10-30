@@ -113,7 +113,7 @@ export default function Auth({
           <h1>{titles[kind]}</h1>
           <p>
             {kind === "login"
-              ? "Sign in to your GNK ALGO paper workspace."
+              ? serverMode ? "Sign in to your GNK ALGO trading workspace." : "Sign in to your GNK ALGO paper workspace."
               : kind === "register"
                 ? "A focused trading experience, from day one."
                 : kind === "verify"
@@ -271,7 +271,7 @@ export default function Auth({
           <div className="auth-security">
             <ShieldCheck size={14} />{" "}
             {serverMode
-              ? "Server sessions · HttpOnly cookies · Paper execution only"
+              ? "Server sessions · HttpOnly cookies · Dhan live execution"
               : "In-memory demo. No credentials retained."}
           </div>
         </div>

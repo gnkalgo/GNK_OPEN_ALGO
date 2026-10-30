@@ -23,7 +23,7 @@ export default function AdminServer() {
     <>
       <PageHead
         title="Workspace administration"
-        subtitle="Server-authorized account management and paper system status."
+        subtitle="Server-authorized account management and execution status."
       />
       <div className="tabs settings-tabs">
         {["Users", "System status", "Audit events", "Configuration"].map(
@@ -107,11 +107,11 @@ export default function AdminServer() {
           ))}
         {tab === "Configuration" && (
           <div className="settings-content">
-            <Badge tone="amber">Paper execution only</Badge>
+            <Badge tone="amber">Dhan live execution controls</Badge>
             <p>
-              Deployment configuration is managed through server environment
-              variables. Secrets and trading mode cannot be changed in the
-              browser.
+              Broker credentials and deployment flags are managed through server
+              environment variables. Review and confirm eligible Dhan live sessions
+              from Broker connections.
             </p>
           </div>
         )}

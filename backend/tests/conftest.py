@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 os.environ["ENVIRONMENT"] = "test"
+os.environ["PAPER_TRADING_ENABLED"] = "true"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["FRONTEND_URL"] = "http://testserver"
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", "sqlite://")

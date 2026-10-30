@@ -1,5 +1,11 @@
 # Host Nginx owns public ports 80/443 and proxies to this localhost-only listener.
 services:
+  api:
+    environment:
+      PAPER_TRADING_ENABLED: "false"
+  worker:
+    environment:
+      PAPER_TRADING_ENABLED: "false"
   web:
     ports: !override
       - '127.0.0.1:8080:80'

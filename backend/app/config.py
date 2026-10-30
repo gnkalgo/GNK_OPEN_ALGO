@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     session_ttl: int = 28800
     live_session_ttl_seconds: int = Field(default=900, ge=60, le=86400)
     cookie_secure: bool = True
-    paper_trading_enabled: bool = True
+    paper_trading_enabled: bool = False
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""

@@ -86,3 +86,8 @@ No order is submitted by applying environment settings or activating a session.
 The backend accepts new live orders on weekdays 09:15-15:20 India time, subject
 to broker trading availability. A session expires according to
 `LIVE_SESSION_TTL_SECONDS` and cannot outlive its broker token.
+
+Paper execution defaults to disabled when `PAPER_TRADING_ENABLED` is absent.
+The production Compose override forces it off even if `.env` enables it.
+For an isolated development paper server only, explicitly set
+`PAPER_TRADING_ENABLED=true` and omit the production override.
