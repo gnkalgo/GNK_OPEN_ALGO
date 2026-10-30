@@ -31,9 +31,12 @@ class BrokerProfile:
     account_name: str
     access_token: str | None = field(default=None, repr=False)
     access_token_expires_at: datetime | None = None
+    account_id: str | None = field(default=None, repr=False)
 
 
 def is_configured(code: str, config: Settings) -> bool:
+    if code == "dhan" and config.dhan_auth_mode == "individual":
+        return all((config.dhan_client_id, config.dhan_api_key, config.dhan_api_secret, config.dhan_token_encryption_key))
     required = {
         "dhan": (
             config.dhan_partner_id,
@@ -75,6 +78,20 @@ def start_authorization(code: str, state: str, config: Settings) -> tuple[str, d
 
     callback = callback_uri(code, config)
     if code == "dhan":
+        if config.dhan_auth_mode == "individual":
+            payload = _call(
+                httpx.post,
+                "https://auth.dhan.co/app/generate-consent",
+                params={"client_id": config.dhan_client_id},
+                headers={"app_id": config.dhan_api_key, "app_secret": config.dhan_api_secret},
+            )
+            consent_id = payload.get("consentAppId")
+            if not isinstance(consent_id, str) or not consent_id:
+                raise BrokerAuthError("Dhan did not start an application authorization session.")
+            return (
+                "https://auth.dhan.co/login/consentApp-login?" + urlencode({"consentAppId": consent_id}),
+                {"consent_id": consent_id},
+            )
         payload = _call(
             httpx.post,
             "https://auth.dhan.co/partner/generate-consent",
@@ -142,9 +159,9 @@ def complete_authorization(
             raise BrokerAuthError("Dhan authorization was cancelled or expired.")
         payload = _call(
             httpx.get,
-            "https://auth.dhan.co/partner/consume-consent",
+            "https://auth.dhan.co/app/consumeApp-consent" if config.dhan_auth_mode == "individual" else "https://auth.dhan.co/partner/consume-consent",
             params={"tokenId": token_id},
-            headers={
+            headers={"app_id": config.dhan_api_key, "app_secret": config.dhan_api_secret} if config.dhan_auth_mode == "individual" else {
                 "partner_id": config.dhan_partner_id,
                 "partner_secret": config.dhan_partner_secret,
             },
@@ -162,9 +179,12 @@ def complete_authorization(
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
         profile = _profile(code, payload.get("dhanClientId"), payload.get("dhanClientName"))
+        if config.dhan_auth_mode == "individual" and payload["dhanClientId"].strip() != config.dhan_client_id:
+            raise BrokerAuthError("Dhan returned an account different from the configured individual account.")
         return BrokerProfile(
             account_id_last4=profile.account_id_last4,
             account_name=profile.account_name,
+            account_id=payload["dhanClientId"].strip(),
             access_token=access_token,
             access_token_expires_at=expires_at.astimezone(UTC),
         )

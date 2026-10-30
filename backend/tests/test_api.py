@@ -110,6 +110,7 @@ def test_broker_account_link_is_confirmed_and_never_persists_tokens(client, monk
         frontend_url="http://testserver",
         cookie_secure=False,
         session_ttl=28800,
+        dhan_auth_mode="partner",
         dhan_partner_id="dhan-id",
         dhan_partner_secret="dhan-secret",
         dhan_token_encryption_key="MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=",
@@ -194,6 +195,7 @@ def test_dhan_link_stores_only_encrypted_access_token(client, monkeypatch):
         frontend_url="http://testserver",
         cookie_secure=False,
         session_ttl=28800,
+        dhan_auth_mode="partner",
         dhan_partner_id="dhan-id",
         dhan_partner_secret="dhan-secret",
         dhan_token_encryption_key=key,
@@ -214,7 +216,7 @@ def test_dhan_link_stores_only_encrypted_access_token(client, monkeypatch):
         broker_auth,
         "complete_authorization",
         lambda code, params, settings: broker_auth.BrokerProfile(
-            "1234", "Dhan Test Account", token, expires_at
+            "1234", "Dhan Test Account", token, expires_at, account_id="1000001234"
         ),
     )
     login(client)
@@ -230,6 +232,7 @@ def test_dhan_link_stores_only_encrypted_access_token(client, monkeypatch):
     pending_token = parse_qs(urlsplit(callback.headers["location"]).fragment)["pending"][0]
     pending_key = "broker-pending:" + digest(pending_token)
     pending_data = json.loads(client.cache.get(pending_key))
+    assert "1000001234" not in client.cache.get(pending_key)
     assert pending_data["access_token_encrypted"] != token
     assert token not in client.cache.get(pending_key)
     assert pending_data["access_token_expires_at"] == expires_at.isoformat()
@@ -241,6 +244,8 @@ def test_dhan_link_stores_only_encrypted_access_token(client, monkeypatch):
     assert confirmed.status_code == 200
     with client.db() as db:
         connection = db.query(BrokerConnection).one()
+        assert decrypt_access_token(connection.account_id_encrypted, config) == "1000001234"
+        assert connection.account_digest == digest("dhan:1000001234")
         assert connection.access_token_encrypted != token
         assert decrypt_access_token(connection.access_token_encrypted, config) == token
         assert connection.access_token_expires_at is not None
@@ -263,6 +268,7 @@ def test_broker_authorization_rejects_unconfigured_provider(client, monkeypatch)
         frontend_url="http://testserver",
         cookie_secure=False,
         session_ttl=28800,
+        dhan_auth_mode="partner",
         dhan_partner_id="",
         dhan_partner_secret="",
         dhan_token_encryption_key="",

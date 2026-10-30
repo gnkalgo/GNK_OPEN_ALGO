@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -97,24 +97,30 @@ def set_policy(
 
 
 @router.get("/platform")
-def platform(user: User = Depends(current_user)):
-    del user
+def platform(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from .live_trading import _control_status, _lock_user, _request_id
+
+    state = _control_status(db, _lock_user(db, user.id), _request_id(request))
     return {
         "platform": "GNK ALGO",
         "contract_version": 1,
         "deployment_stage": "development",
-        "execution": "paper-only",
-        "live_orders_enabled": False,
+        "execution": state["execution"],
+        "live_orders_enabled": state["live_orders_enabled"],
+        "paper_trading_enabled": state["paper_trading_enabled"],
         "capabilities": [
-            {"name": "Paper order ledger", "status": "available"},
+            {"name": "Paper order ledger", "status": "available" if state["paper_trading_enabled"] else "read_only"},
             {"name": "Account risk limits", "status": "available"},
             {"name": "Broker account linking", "status": "configuration_required"},
             {"name": "Live market data", "status": "unavailable"},
-            {"name": "Live broker execution", "status": "unavailable"},
+            {
+                "name": "Dhan delivery BUY LIMIT",
+                "status": "available" if state["live_orders_enabled"] else "activation_required",
+            },
             {"name": "Strategy execution engine", "status": "unavailable"},
         ],
         "release_blockers": [
-            "BROKER_EXECUTION_AND_RECONCILIATION",
+            "DHAN_PILOT_DEPLOYMENT_ACCEPTANCE",
             "LICENSED_MARKET_DATA_AND_INSTRUMENTS",
             "LIVE_MARGIN_AND_RISK_VALIDATION",
             "BROKER_AND_EXCHANGE_APPROVAL",

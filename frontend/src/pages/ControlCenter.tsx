@@ -55,8 +55,8 @@ export default function ControlCenter() {
       <div className="control-emblem"><ShieldCheck size={32}/></div>
       <div><div className="eyebrow">GNK ALGO / EXECUTION BOUNDARY</div>
         <h2>Your account. Your limits.</h2>
-        <p>Paper trading is available. Live trading stays locked while broker execution and operational approvals are being completed.</p>
-      </div><Badge tone="amber">Live execution locked</Badge>
+        <p>{platform?.live_orders_enabled ? "Your validated Dhan live session is active. Live orders use separate risk caps and a real broker ledger." : platform?.paper_trading_enabled === false ? "Paper trading is disabled. Review broker connections to resolve live blockers and confirm a Dhan live session." : "Dhan live trading requires a validated session and approved server configuration."}</p>
+      </div><Badge tone={platform?.live_orders_enabled ? "red" : "amber"}>{platform?.live_orders_enabled ? "Dhan live session active" : "Live execution locked"}</Badge>
     </section>
     {!serverMode && <div className="banner warning" role="status">Demo preview. Persisted account controls require a GNK server session. No risk limits are changed here.</div>}
     {loading && <p role="status">Loading account controls…</p>}

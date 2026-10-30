@@ -17,7 +17,7 @@ def _fernet(config: Settings) -> Fernet:
 
 
 def encrypt_access_token(token: str, config: Settings) -> str:
-    if not token:
+    if not isinstance(token, str) or not token:
         raise TokenVaultError("Dhan returned an empty access token.")
     return _fernet(config).encrypt(token.encode("utf-8")).decode("ascii")
 

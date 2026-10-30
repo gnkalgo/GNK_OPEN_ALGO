@@ -3,10 +3,11 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Check, ExternalLink, Link2, ShieldCheck, Unplug } from "lucide-react";
 import { paper, serverMode } from "../api/paper";
 import { server, type BrokerCode, type BrokerProvider } from "../api/server";
-import { useAction, usePaper } from "../hooks";
+import { useAction, usePaper, useTradingStatus } from "../hooks";
 import { Badge, Feedback, PageHead, Panel } from "../components/ui";
 import { LiveTradingPanel } from "../components/LiveTradingPanel";
 export default function Brokers({ callback = false }: { callback?: boolean }) {
+  const trading = useTradingStatus();
   const { broker } = usePaper(),
     a = useAction(),
     [authorize, setAuthorize] = useState(false),
@@ -211,7 +212,7 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
       )}
       {serverMode && !callback && <LiveTradingPanel />}
       <div className="two-column">
-        <Panel
+        {(!serverMode || trading?.paper_trading_enabled === true) && <Panel
           title="GNK Paper Broker"
           extra={
             <Badge tone={broker === "Connected" ? "green" : "amber"}>
@@ -285,7 +286,7 @@ export default function Brokers({ callback = false }: { callback?: boolean }) {
               </div>
             )}
           </div>
-        </Panel>
+        </Panel>}
         <Panel title="Connection checklist">
           <div className="steps-list">
             <div>

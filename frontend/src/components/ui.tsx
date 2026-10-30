@@ -178,7 +178,7 @@ export function Modal({
     <dialog
       ref={ref}
       aria-label={title}
-      onCancel={close}
+      onCancel={(event) => { event.preventDefault(); close(); }}
       onClick={(e) => {
         if (e.target === e.currentTarget) close();
       }}

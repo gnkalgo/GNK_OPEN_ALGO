@@ -11,6 +11,7 @@ import {
 import { Shell } from "./components/Shell";
 import Landing from "./pages/Landing";
 import Auth from "./pages/Auth";
+import LiveDesk from "./pages/LiveDesk";
 import ControlCenter from "./pages/ControlCenter";
 import Dashboard from "./pages/Dashboard";
 import Markets from "./pages/Markets";
@@ -36,7 +37,7 @@ class ErrorBoundary extends Component<
       <div className="fatal-error">
         <h1>Something interrupted your workspace.</h1>
         <p>
-          Reload to start a new paper session. No real orders were submitted.
+          Reload to reconnect. Review pending orders in their order book before retrying.
         </p>
         <button className="button primary" onClick={() => location.reload()}>
           Reload workspace
@@ -87,6 +88,7 @@ function App() {
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="controls" element={<ControlCenter />} />
+        <Route path="live" element={<LiveDesk />} />
         <Route path="markets" element={<Markets />} />
         <Route path="brokers" element={<Brokers />} />
         <Route path="brokers/callback" element={<Brokers callback />} />

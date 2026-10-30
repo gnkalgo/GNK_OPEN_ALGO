@@ -1,4 +1,6 @@
+from decimal import Decimal
 from functools import lru_cache
+from typing import Literal
 
 from cryptography.fernet import Fernet
 from pydantic import Field, field_validator
@@ -14,6 +16,7 @@ class Settings(BaseSettings):
     session_ttl: int = 28800
     live_session_ttl_seconds: int = Field(default=900, ge=60, le=86400)
     cookie_secure: bool = True
+    paper_trading_enabled: bool = True
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
@@ -22,7 +25,20 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     dhan_partner_id: str = ""
     dhan_partner_secret: str = ""
+    dhan_auth_mode: Literal["partner", "individual"] = "partner"
+    dhan_client_id: str = ""
+    dhan_api_key: str = ""
+    dhan_api_secret: str = ""
     dhan_token_encryption_key: str = ""
+    dhan_live_enabled: bool = False
+    dhan_live_approved: bool = False
+    dhan_execution_ip: str = ""
+    dhan_live_account_ids: str = ""
+    dhan_live_security_ids: str = ""
+    dhan_live_max_order_value: Decimal = Field(default=Decimal("50000"), gt=0, le=50000)
+    dhan_live_max_daily_value: Decimal = Field(default=Decimal("50000"), gt=0, le=50000)
+    dhan_live_max_quantity: int = Field(default=10, ge=1, le=100)
+
     fyers_client_id: str = ""
     fyers_app_secret: str = ""
     zerodha_api_key: str = ""

@@ -12,6 +12,7 @@ FERNET_KEY = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI="
 def credentials():
     return SimpleNamespace(
         frontend_url="https://gnkalgo.com",
+        dhan_auth_mode="partner",
         dhan_partner_id="dhan-id",
         dhan_partner_secret="dhan-secret",
         dhan_token_encryption_key=FERNET_KEY,

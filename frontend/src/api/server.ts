@@ -1,6 +1,6 @@
 import type { Order, Snapshot, Strategy, Ticket } from "./paper";
 const prefix = "/api/v1/gnkalgo";
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -21,8 +21,9 @@ export type RiskPolicy = {
   live_orders_enabled: false;
 };
 export type PlatformStatus = {
-  execution: "paper-only";
-  live_orders_enabled: false;
+  paper_trading_enabled?: boolean;
+  execution: "paper-only" | "paper-and-dhan";
+  live_orders_enabled: boolean;
   capabilities: { name: string; status: string }[];
   release_blockers: string[];
 };
@@ -62,26 +63,27 @@ export type LiveTradingSession = {
   expires_at: string;
   ended_at: string | null;
   suspension_reason: string | null;
-  broker_auth_valid: false;
-  live_orders_enabled: false;
+  broker_auth_valid: boolean;
+  live_orders_enabled: boolean;
 };
 export type LiveTradingStatus = {
-  mode: "PAPER";
-  live_available: false;
-  live_orders_enabled: false;
-  execution: "paper-only";
+  mode: "PAPER" | "LIVE" | "DISABLED";
+  paper_trading_enabled?: boolean;
+  live_available: boolean;
+  live_orders_enabled: boolean;
+  execution: "paper-only" | "paper-and-dhan";
   emergency_stop: boolean;
   session_status: LiveSessionState;
-  last_connection_check: null;
-  broker_auth_valid: false;
-  risk_limits: null;
+  last_connection_check: string | null;
+  broker_auth_valid: boolean;
+  risk_limits: { max_order_value: string; max_daily_value: string; max_quantity: number } | null;
   blockers: string[];
   brokers: Array<{
     code: BrokerCode;
     name: string;
     account_mask: string;
     account_linked: true;
-    broker_auth_valid: false;
+    broker_auth_valid: boolean;
   }>;
   session: LiveTradingSession | null;
 };
@@ -346,4 +348,20 @@ export const server = {
       enabled,
     });
   },
+};
+
+
+export type DhanInstrument = {security_id:string; name:string; tick_size:string; lower_limit:string; upper_limit:string};
+export type DhanOrder = {id:string; session_id:string; security_id:string; name:string; side:"BUY"; product:"CNC";
+  type:"LIMIT"; quantity:number; price:string; status:string; broker_order_id:string|null; filled_quantity:number;
+  average_price:string; reason:string|null; created_at:string};
+export type DhanPreview = {preview_token:string; expires_in:number; account_mask:string;
+  ticket:{security_id:string;name:string;quantity:number;price:string};
+  margin:{available:string;required_margin:string;brokerage_estimate:string};mode:"LIVE";side:"BUY";product:"CNC";type:"LIMIT"};
+export const dhan = {
+  instruments: () => request<{instruments:DhanInstrument[]}>("/dhan/instruments"),
+  orders: () => request<{orders:DhanOrder[]}>("/dhan/orders"),
+  preview: (body:{session_id:string;security_id:string;quantity:number;price:string}) => request<DhanPreview>("/dhan/orders/preview", "POST", body),
+  submit: (preview_token:string, key:string) => request<DhanOrder>("/dhan/orders", "POST", {preview_token,confirmed:true}, {"Idempotency-Key":key}),
+  reconcile: (id:string) => request<DhanOrder>(`/dhan/orders/${encodeURIComponent(id)}/reconcile`, "POST"),
 };

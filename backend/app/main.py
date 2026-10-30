@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from . import broker_auth
 from .config import settings
 from .db import get_db
+from .dhan_live import router as dhan_live_router
 from .live_trading import router as live_trading_router
 from .models import (
     AuditEvent,
@@ -68,6 +69,7 @@ app = FastAPI(
     redoc_url=None,
 )
 app.include_router(live_trading_router)
+app.include_router(dhan_live_router)
 app.include_router(risk_router)
 PREFIX = "/api/gnk/v1"
 GNK_ALGO_PREFIX = "/api/v1/gnkalgo"
@@ -176,14 +178,14 @@ def consume_token(db, raw, purpose):
 
 @app.get("/api/health/live")
 def live():
-    return {"status": "ok", "execution": "paper-only"}
+    return {"status": "ok", "execution": "paper-and-dhan" if settings().dhan_live_enabled else "paper-only"}
 
 
 @app.get("/api/health/ready")
 def ready(db: Session = Depends(get_db), cache: Redis = Depends(get_redis)):
     db.execute(text("SELECT 1"))
     cache.ping()
-    return {"status": "ready", "execution": "paper-only"}
+    return {"status": "ready", "execution": "paper-and-dhan" if settings().dhan_live_enabled else "paper-only"}
 
 
 def broker_callback_paths() -> tuple[str, ...]:
@@ -192,7 +194,7 @@ def broker_callback_paths() -> tuple[str, ...]:
 
 @app.get(f"{GNK_ALGO_PREFIX}/health")
 def gnkalgo_health():
-    return {"status": "ok", "execution": "paper-only"}
+    return {"status": "ok", "execution": "paper-and-dhan" if settings().dhan_live_enabled else "paper-only"}
 
 
 @app.get(f"{GNK_ALGO_PREFIX}/status")
@@ -773,6 +775,8 @@ def workspace(user: User = Depends(current_user), db: Session = Depends(get_db))
 
 @app.post(PREFIX + "/brokers/paper/connect")
 def connect(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if not settings().paper_trading_enabled:
+        fail(409, "PAPER_TRADING_DISABLED", "Paper trading is disabled on this server. Use the Dhan live desk.")
     user.broker = "Connected"
     audit(db, user, "Paper broker connected")
     db.commit()
@@ -933,6 +937,8 @@ def broker_callback(
                 "code": code,
                 "account_id_last4": profile.account_id_last4,
                 "account_name": profile.account_name,
+                "account_id_encrypted": (encrypt_access_token(profile.account_id, settings()) if code == "dhan" and profile.account_id else None),
+                "account_digest": (digest("dhan:" + profile.account_id) if code == "dhan" and profile.account_id else None),
                 "access_token_encrypted": encrypted_access_token,
                 "access_token_expires_at": (
                     profile.access_token_expires_at.isoformat()
@@ -996,6 +1002,8 @@ def broker_confirm(
     if connection:
         connection.account_id_last4 = data["account_id_last4"]
         connection.account_name = data["account_name"]
+        connection.account_id_encrypted = data.get("account_id_encrypted")
+        connection.account_digest = data.get("account_digest")
         connection.access_token_encrypted = data.get("access_token_encrypted")
         expiry = data.get("access_token_expires_at")
         connection.access_token_expires_at = (
@@ -1009,6 +1017,8 @@ def broker_confirm(
                 broker_code=code,
                 account_id_last4=data["account_id_last4"],
                 account_name=data["account_name"],
+                account_id_encrypted=data.get("account_id_encrypted"),
+                account_digest=data.get("account_digest"),
                 access_token_encrypted=data.get("access_token_encrypted"),
                 access_token_expires_at=(
                     datetime.fromisoformat(data["access_token_expires_at"])
@@ -1017,6 +1027,11 @@ def broker_confirm(
                 ),
             )
         )
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        fail(409, "BROKER_ACCOUNT_ALREADY_LINKED", "This broker account is already linked to a GNK account.")
     live_sessions = db.scalars(
         select(LiveTradingSession)
         .where(
@@ -1125,6 +1140,8 @@ def submit(
                 "Request key was already used for different order parameters.",
             )
         return order_view(existing)
+    if not settings().paper_trading_enabled:
+        fail(409, "PAPER_TRADING_DISABLED", "Paper trading is disabled on this server. Use the Dhan live desk.")
     if user.broker != "Connected":
         fail(409, "BROKER_EXPIRED", "Connect the paper broker first.")
     if (
@@ -1255,6 +1272,8 @@ def transition(
         fail(404, "NOT_FOUND", "Strategy not found.")
     if body.status not in allowed[strategy.status]:
         fail(409, "INVALID_TRANSITION", "Validate and paper test before activation.")
+    if body.status in {"Tested", "Active"} and not settings().paper_trading_enabled:
+        fail(409, "PAPER_TRADING_DISABLED", "Paper strategy testing and activation are disabled on this server.")
     if body.status == "Active" and user.broker != "Connected":
         fail(409, "BROKER_EXPIRED", "Connect the paper broker first.")
     strategy.status = body.status
@@ -1316,6 +1335,6 @@ def system_status(
     return {
         "database": "ready",
         "redis": "ready",
-        "execution": "paper-only",
+        "execution": "paper-and-dhan" if settings().dhan_live_enabled else "paper-only",
         "mail_queue": cache.llen("gnk:mail"),
     }

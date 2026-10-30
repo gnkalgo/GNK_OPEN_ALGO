@@ -63,6 +63,8 @@ class BrokerConnection(Base):
     broker_code: Mapped[str] = mapped_column(String(20))
     account_id_last4: Mapped[str] = mapped_column(String(4))
     account_name: Mapped[str] = mapped_column(String(120))
+    account_id_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    account_digest: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     access_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     access_token_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -78,6 +80,7 @@ class LiveTradingSession(Base):
         ForeignKey("broker_connections.id", ondelete="SET NULL"), index=True, nullable=True
     )
     broker_code: Mapped[str] = mapped_column(String(20))
+    broker_account_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     broker_account_last4: Mapped[str] = mapped_column(String(4))
     status: Mapped[str] = mapped_column(String(32), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -148,3 +151,35 @@ class MailOutbox(Base):
     # Plain tokens are deliberately NOT persisted here. Worker generates a fresh token.
     sent: Mapped[bool] = mapped_column(Boolean, default=False)
     attempts: Mapped[int] = mapped_column(default=0)
+
+
+class DhanInstrument(Base):
+    __tablename__ = "dhan_instruments"
+    security_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    lot_size: Mapped[int] = mapped_column()
+    tick_size: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    lower_limit: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    upper_limit: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    freeze_quantity: Mapped[int] = mapped_column()
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class LiveOrder(Base):
+    __tablename__ = "live_orders"
+    __table_args__ = (UniqueConstraint("user_id", "request_key", name="uq_live_order_user_key"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("live_trading_sessions.id"))
+    account_digest: Mapped[str] = mapped_column(String(64), index=True)
+    request_key: Mapped[str] = mapped_column(String(36))
+    correlation_id: Mapped[str] = mapped_column(String(30), unique=True)
+    ticket: Mapped[dict] = mapped_column(JSON)
+    broker_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="UNKNOWN")
+    filled_quantity: Mapped[int] = mapped_column(default=0)
+    average_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal(0))
+    reason: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,6 +1,6 @@
 import { ledger } from "../api/ledger";
 import { useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
@@ -12,10 +12,11 @@ import {
   instruments,
   money,
   paper,
+  serverMode,
   validateTicket,
   type Ticket,
 } from "../api/paper";
-import { useAction, usePaper } from "../hooks";
+import { useAction, usePaper, useTradingStatus } from "../hooks";
 import {
   Badge,
   Empty,
@@ -25,6 +26,7 @@ import {
   Panel,
 } from "../components/ui";
 export function OrderEntry() {
+  const trading = useTradingStatus();
   const [params] = useSearchParams(),
     navigate = useNavigate(),
     a = useAction(),
@@ -61,6 +63,8 @@ export function OrderEntry() {
     });
     submitting.current = false;
   }
+  if (serverMode && !trading) return <p role="status">Checking trading availability…</p>;
+  if (serverMode && trading?.paper_trading_enabled === false) return <Navigate to="/app/live" replace />;
   return (
     <>
       <PageHead

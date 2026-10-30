@@ -30,7 +30,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { paper, serverMode, type Scenario } from "../api/paper";
-import { usePaper } from "../hooks";
+import { usePaper, useTradingStatus } from "../hooks";
 import { Badge, Brand, Modal } from "./ui";
 const navigation = [
   {
@@ -54,6 +54,7 @@ const navigation = [
     title: "MANAGE",
     items: [
       ["Broker connections", "/app/brokers", Unplug],
+      ["Dhan live desk", "/app/live", ShieldCheck],
       ["Control center", "/app/controls", ShieldCheck],
       ["Settings", "/app/profile", Settings2],
     ],
@@ -131,6 +132,8 @@ export function Shell() {
   }, []);
   const location = useLocation(),
     navigate = useNavigate();
+  const trading = useTradingStatus(location.pathname);
+  const tradingLabel = !serverMode ? "Paper trading" : !trading ? "Trading status unavailable" : trading.live_orders_enabled ? "Dhan live session active" : trading.paper_trading_enabled === false ? "Trading inactive" : "Paper trading";
   useEffect(() => {
     setMobile(false);
     document.querySelector("main")?.focus();
@@ -180,7 +183,7 @@ export function Shell() {
         <div className="workspace-label">
           <span className="workspace-avatar">G</span>
           <span>
-            Personal workspace<small>Paper trading account</small>
+            Personal workspace<small>{tradingLabel}</small>
           </span>
           <ChevronRight size={14} />
         </div>
@@ -287,7 +290,7 @@ export function Shell() {
                 <Command size={10} /> K
               </kbd>
             </Link>
-            <Badge tone="amber">Paper trading</Badge>
+            <Badge tone={trading?.live_orders_enabled ? "red" : "amber"}>{tradingLabel}</Badge>
             <button
               className="icon-btn notification-button"
               aria-label="Notifications"
@@ -305,7 +308,7 @@ export function Shell() {
             </Link>
           </div>
         </header>
-        <div className="ticker-strip">
+        {location.pathname !== "/app/live" && <div className="ticker-strip">
           {[
             ["NIFTY 50", "24,825.10", "+0.67%"],
             ["SENSEX", "81,467.10", "+0.54%"],
@@ -321,7 +324,7 @@ export function Shell() {
             </div>
           ))}
           <span className="ticker-note">FICTIONAL MARKET SNAPSHOT</span>
-        </div>
+        </div>}
         <main id="main" tabIndex={-1}>
           {!online && (
             <div className="banner warning" role="alert">
@@ -329,13 +332,13 @@ export function Shell() {
               Mutations are blocked.
             </div>
           )}
-          {broker === "Expired" && (
+          {location.pathname !== "/app/live" && broker === "Expired" && (
             <div className="banner warning" role="alert">
               Paper broker token expired.{" "}
               <Link to="/app/brokers">Reconnect broker →</Link>
             </div>
           )}
-          {scenario === "feed-offline" && (
+          {location.pathname !== "/app/live" && scenario === "feed-offline" && (
             <div className="banner warning" role="alert">
               Market feed disconnected. Prices are stale; new orders are
               blocked.{" "}
@@ -349,10 +352,11 @@ export function Shell() {
         <footer className="app-footer">
           <span>
             <span className="status-dot" />{" "}
-            {scenario === "feed-offline"
+            {location.pathname === "/app/live"
+              ? "Dhan live order desk" : scenario === "feed-offline"
               ? "Feed offline"
               : "Paper simulator ready"}
-            <i /> All figures are fictional
+            <i /> {location.pathname === "/app/live" ? "Confirmed live orders use real broker funds" : "All figures are fictional"}
           </span>
           <DemoLab />
           <span>
